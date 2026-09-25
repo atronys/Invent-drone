@@ -2,9 +2,13 @@
 # ENV-06: тесты перед каждым коммитом. Разово пропустить: git commit --no-verify
 set -e
 ROOT="$(git rev-parse --show-toplevel)"
+# Выбор интерпретатора: сначала тот, где есть numpy (нужен research/ и tools/), иначе любой >= 3.10.
+# На Windows python3 бывает заглушкой Microsoft Store или отдельной версией без пакетов.
 PY=""
-for c in python3 python; do   # на Windows python3 бывает заглушкой Microsoft Store — проверяем, что работает
-  if "$c" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then PY="$c"; break; fi
+for need in "import numpy" ""; do
+  for c in python3 python; do
+    if "$c" -c "import sys; assert sys.version_info >= (3, 10); $need" 2>/dev/null; then PY="$c"; break 2; fi
+  done
 done
 [ -n "$PY" ] || { echo "pre-commit: не найден Python >= 3.10"; exit 1; }
 (cd "$ROOT/core" && "$PY" -m unittest discover -s tests -q) || { echo "pre-commit: тесты core упали — коммит отменён"; exit 1; }
