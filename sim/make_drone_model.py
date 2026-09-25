@@ -83,7 +83,7 @@ def mounts(offset_y: float = 0.08, z: float = ScanParams.camera_z_offset, tilt_d
     ]
 
 
-def build(cam: Camera, rate: float = 2.0, tilt_down_deg: float = 0.0) -> dict[str, str]:
+def build(cam: Camera, rate: float = 2.0, tilt_down_deg: float = 0.0, world: str = "warehouse") -> dict[str, str]:
     """-> {имя файла: содержимое}."""
     g = gazebo_camera(cam)
     ms = mounts(tilt_down_deg=tilt_down_deg)
@@ -118,10 +118,13 @@ def build(cam: Camera, rate: float = 2.0, tilt_down_deg: float = 0.0) -> dict[st
 </model>
 """
     bridge = ["# ros_gz_bridge: ros2 run ros_gz_bridge parameter_bridge --ros-args -p config_file:=bridge.yaml"]
-    for topic, ros_t, gz_t in [("/clock", "rosgraph_msgs/msg/Clock", "gz.msgs.Clock"),
-                               *[(m["topic"], "sensor_msgs/msg/Image", "gz.msgs.Image") for m in ms],
-                               ("/depth_camera", "sensor_msgs/msg/Image", "gz.msgs.Image")]:
-        bridge.append(f'- ros_topic_name: "{topic}"\n  gz_topic_name: "{topic}"\n  ros_type_name: "{ros_t}"\n'
+    for ros_topic, gz_topic, ros_t, gz_t in [
+            ("/clock", "/clock", "rosgraph_msgs/msg/Clock", "gz.msgs.Clock"),
+            *[(m["topic"], m["topic"], "sensor_msgs/msg/Image", "gz.msgs.Image") for m in ms],
+            ("/depth_camera", "/depth_camera", "sensor_msgs/msg/Image", "gz.msgs.Image"),
+            # истинные позы моделей — для «фальшивого VIO» (SIM-05) и метрик
+            ("/gz/dynamic_pose", f"/world/{world}/dynamic_pose/info", "tf2_msgs/msg/TFMessage", "gz.msgs.Pose_V")]:
+        bridge.append(f'- ros_topic_name: "{ros_topic}"\n  gz_topic_name: "{gz_topic}"\n  ros_type_name: "{ros_t}"\n'
                       f'  gz_type_name: "{gz_t}"\n  direction: GZ_TO_ROS')
     files = {"model.sdf": sdf, "model.config": config, "bridge.yaml": "\n".join(bridge) + "\n",
              "mounts.json": json.dumps({"base_frame": "base_link", "cameras": ms}, ensure_ascii=False, indent=1)}

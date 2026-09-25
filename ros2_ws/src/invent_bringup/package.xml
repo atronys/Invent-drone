@@ -13,6 +13,7 @@
   <exec_depend>invent_mission</exec_depend>
   <exec_depend>invent_perception</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>invent_localization</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

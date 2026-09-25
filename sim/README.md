@@ -54,8 +54,24 @@ python3 sim/eval_read_rate.py sim/worlds/demo/truth.csv ~/invent_runs/<файл>
 python3 -m invent_core reconcile sim/worlds/demo/wms_expected.csv ~/invent_runs/<файл>.csv -o report.csv
 ```
 
+## 5. Полёт без GPS (SIM-05, LOC-11)
+
+```bash
+# в консоли PX4 (pxh>) один раз: выключить GPS, включить внешнюю навигацию (позиция + курс), высота — от неё же
+param set EKF2_GPS_CTRL 0
+param set EKF2_EV_CTRL 11
+param set EKF2_HGT_REF 3
+param save
+# запуск с «фальшивым VIO» (истина Gazebo + дрейф) и локализацией по адресным этикеткам -> /fmu/in/vehicle_visual_odometry
+ros2 launch invent_bringup sim_mission.launch.py layout:=... model_dir:=... localization:=true
+```
+
+Проверено по исходникам PX4 v1.17.0 (`src/modules/ekf2/module.yaml`): биты `EKF2_EV_CTRL` — 0 горизонтальная
+позиция, 1 вертикальная, 2 скорость, 3 курс (11 = 0+1+3); `EKF2_HGT_REF=3` — Vision, **требует перезапуска PX4**.
+Имя и маску `EKF2_GPS_CTRL` сверить в `param show EKF2_GPS*`.
+
 ## Что дальше (backlog)
 
-- SIM-05: полёт **без GPS** (`EKF2_GPS_CTRL=0`) на внешней одометрии — сначала ground truth с шумом, потом VIO.
+- SIM-05: проверить цепочку без GPS в SITL (раздел 5), затем заменить фальшивый VIO на OpenVINS (LOC-03).
 
 Пока GPS в SITL включён — это нормально только для самой первой отладки маршрута.

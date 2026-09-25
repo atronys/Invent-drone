@@ -16,5 +16,8 @@ setup(
     maintainer_email="todo@example.com",
     description="LOC-11: EKF-локализация по адресным этикеткам поверх VIO",
     license="Proprietary",
-    entry_points={"console_scripts": ["landmark_localizer = invent_localization.landmark_localizer_node:main"]},
+    entry_points={"console_scripts": [
+        "landmark_localizer = invent_localization.landmark_localizer_node:main",
+        "fake_vio = invent_localization.fake_vio_node:main",
+    ]},
 )
