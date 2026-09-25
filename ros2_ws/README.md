@@ -3,9 +3,10 @@
 | Пакет | Что делает | Статус |
 |---|---|---|
 | `invent_msgs` | `LabelRead`, `MissionStatus` | готов |
-| `invent_mission` | план `invent_core.coverage` -> PX4 Offboard (uXRCE-DDS): взлёт, маршрут с ограничением скорости и разворота, посадка | скелет, работает в SITL |
+| `invent_mission` | `mission_node`: план `invent_core.coverage` -> PX4 Offboard (uXRCE-DDS), остановка/замедление по `safety/state`; `odom_tf`: TF дрона и камер; `safety_monitor`: depth + геозона | код готов, в SITL не запускался |
 | `invent_perception` | `label_reader`: кадр -> zxing-cpp -> `LabelRead` (+ SSCC, + адрес ячейки по TF); `scan_recorder`: CSV вылета для сверки | код готов, в SITL не запускался |
-| `invent_bringup` | `sim_mission.launch.py` | готов для SITL |
+| `invent_localization` | `landmark_localizer`: EKF по адресным этикеткам поверх VIO -> `localization/odom`, TF map->odom, опционально поза в PX4 | код готов, в SITL не запускался |
+| `invent_bringup` | `sim_mission.launch.py`: агент, мост ros_gz, odom_tf, safety_monitor, миссия, 2 × label_reader, scan_recorder | готов для SITL |
 | `px4_msgs` | клонируется скриптом установки под версию PX4 | внешний |
 
 Логика (планирование, геометрия, сверка) живёт в `core/invent_core` — узлы только обёртки.
@@ -23,5 +24,4 @@ source install/setup.bash
 приходят — `ros2 topic list | grep fmu` и параметры `vehicle_status_topic` / `local_position_topic`.
 `px4_msgs` должен быть из ветки под версию PX4 (`release/1.17` для v1.17.x).
 
-Следующие узлы по backlog: `safety_monitor` (SAFE-01), `landmark_localizer` (LOC-11, по прототипу
-`research/landmark_ekf`).
+Следующее по backlog: «фальшивый VIO» из ground truth Gazebo (SIM-05), затем OpenVINS на записи (LOC-03).

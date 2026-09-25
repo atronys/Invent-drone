@@ -25,11 +25,11 @@
 ```
 core/          ядро на Python (без ROS): модель склада, планировщик облёта и перескана, камера с дисторсией,
                кадры/повороты, 6-DoF привязка этикетки к ячейке, PnP, GS1, сверка с WMS
-sim/           генератор мира Gazebo (паллетные и адресные этикетки, сценарии) + истина + WMS с ошибками + метрики
-research/      прототипы для диплома: landmark_ekf — локализация по этикеткам (EKF по книге Gao & Zhang)
+sim/           генератор мира Gazebo + модель дрона x500_invent + виртуальный облёт всего конвейера без Gazebo
+research/      эксперименты для диплома: landmark_ekf (локализация по этикеткам), virtual_flight (оптика, смаз, поза)
 tools/         calibrate_camera.py — калибровка по шахматке -> ROS camera_info
-ros2_ws/src/   ROS 2 Jazzy: invent_msgs, invent_mission (PX4 Offboard), invent_perception
-               (label_reader с адресом по TF, scan_recorder), invent_bringup
+ros2_ws/src/   ROS 2 Jazzy: invent_msgs, invent_mission (миссия, TF, безопасность), invent_perception
+               (label_reader, scan_recorder), invent_localization (EKF по этикеткам), invent_bringup
 scripts/       setup_ubuntu.sh — вся среда одной командой (ROS 2, PX4 SITL, Gazebo, XRCE-агент)
 docker/        slambook — изолированная среда для упражнений из книги Gao & Zhang
 backend/ ml/ hardware/   заготовки на Ф2–Ф3 (README с планом)
@@ -53,8 +53,9 @@ python -m invent_core reconcile wms.csv observations.csv -o report.csv
 cd .. && python research/landmark_ekf/ekf_sim.py --seeds 10 --plot   # эксперимент LOC-08
 ```
 
-Все тесты (их же гоняет хук перед коммитом): `core/tests`, `sim/tests`, `tools/tests`, `research/tests` —
-54 теста, на Python 3.10 с numpy и OpenCV.
+Окружение для разработки: `python -m venv .venv` и `.venv/Scripts/python -m pip install -r requirements-dev.txt`.
+Тесты (их же гоняет хук перед коммитом): `core/tests`, `sim/tests`, `tools/tests`, `research/tests`;
+медленные (виртуальный облёт 12 Мп) — с `INVENT_SLOW_TESTS=1`.
 
 Симуляция и ROS 2 — на Ubuntu 24.04: `bash scripts/setup_ubuntu.sh`, затем [sim/README.md](sim/README.md).
 
