@@ -1,0 +1,94 @@
+{
+  "name": "demo",
+  "rows": [
+    {
+      "id": "A",
+      "origin_x": 0.0,
+      "face_y": 1.1,
+      "normal_y": 1,
+      "bays": 10,
+      "bay_width": 2.7,
+      "slots_per_bay": 3,
+      "level_z": [
+        0.0,
+        1.8,
+        3.6,
+        5.4
+      ],
+      "label_height": 0.5
+    },
+    {
+      "id": "B",
+      "origin_x": 0.0,
+      "face_y": 4.1,
+      "normal_y": -1,
+      "bays": 10,
+      "bay_width": 2.7,
+      "slots_per_bay": 3,
+      "level_z": [
+        0.0,
+        1.8,
+        3.6,
+        5.4
+      ],
+      "label_height": 0.5
+    },
+    {
+      "id": "C",
+      "origin_x": 0.0,
+      "face_y": 6.5,
+      "normal_y": 1,
+      "bays": 10,
+      "bay_width": 2.7,
+      "slots_per_bay": 3,
+      "level_z": [
+        0.0,
+        1.8,
+        3.6,
+        5.4
+      ],
+      "label_height": 0.5
+    },
+    {
+      "id": "D",
+      "origin_x": 0.0,
+      "face_y": 9.5,
+      "normal_y": -1,
+      "bays": 10,
+      "bay_width": 2.7,
+      "slots_per_bay": 3,
+      "level_z": [
+        0.0,
+        1.8,
+        3.6,
+        5.4
+      ],
+      "label_height": 0.5
+    }
+  ],
+  "aisles": [
+    {
+      "id": "1",
+      "y": 2.5999999999999996,
+      "rows": [
+        "A",
+        "B"
+      ]
+    },
+    {
+      "id": "2",
+      "y": 8.0,
+      "rows": [
+        "C",
+        "D"
+      ]
+    }
+  ],
+  "dock": [
+    -2.0,
+    2.5999999999999996,
+    0.0
+  ],
+  "cross_aisle_x": -2.0,
+  "ceiling_z": 8.7
+}

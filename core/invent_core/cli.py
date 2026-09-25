@@ -1,0 +1,120 @@
+"""CLI ядра: python -m invent_core <команда> --help
+
+  make-layout  сгенерировать типовой склад (JSON)
+  plan         план облёта: пролёты, вылеты, время, ячеек/час
+  optics       проверка оптики: читается ли этикетка на дистанции и скорости
+  reconcile    сверка наблюдений с выгрузкой WMS/1С -> CSV-отчёт
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from dataclasses import asdict, replace
+
+from . import barcode
+from .camera import Camera
+from .coverage import ScanParams, plan
+from .layout import Warehouse, make_grid_warehouse
+from .reconcile import load_expected_csv, load_observations_csv, reconcile, write_report_csv
+
+
+def _camera(a) -> Camera:
+    return Camera(a.width, a.height, a.hfov, a.vfov)
+
+
+def cmd_make_layout(a) -> None:
+    wh = make_grid_warehouse(n_aisles=a.aisles, bays=a.bays, levels=a.levels, aisle_width=a.aisle_width, name=a.name)
+    wh.save(a.out)
+    print(f"{a.out}: рядов {len(wh.rows)}, проходов {len(wh.aisles)}, ячеек {len(wh.locations())}")
+
+
+def cmd_plan(a) -> None:
+    wh = Warehouse.load(a.layout)
+    p = replace(ScanParams(camera=_camera(a)), battery_s=a.battery, hold_s=a.hold, v_scan=a.v_scan)
+    pl = plan(wh, p)
+    n_wp = sum(len(s.waypoints) for s in pl.sorties)
+    print(f"Склад «{wh.name}»: ячеек {len(wh.locations())}, покрыто {len(pl.covered)}")
+    print(f"Вылетов: {len(pl.sorties)}, точек маршрута: {n_wp}")
+    for i, s in enumerate(pl.sorties):
+        print(f"  вылет {i}: {s.duration_s / 60:5.1f} мин, ячеек {len(s.targets)}")
+    print(f"Полётное время: {pl.flight_s / 60:.1f} мин, с заменой АКБ: {pl.wall_clock_s / 60:.1f} мин")
+    print(f"Производительность: {pl.locations_per_hour:.0f} ячеек/ч")
+    for w in pl.warnings:
+        print(f"ВНИМАНИЕ: {w}")
+    if a.export:
+        data = [[{k: round(v, 3) if isinstance(v, float) else v for k, v in asdict(w).items()}
+                 for w in s.waypoints] for s in pl.sorties]
+        with open(a.export, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+        print(f"Маршрут сохранён: {a.export}")
+
+
+def cmd_optics(a) -> None:
+    cam = _camera(a)
+    fw, fh = cam.footprint(a.distance)
+    print(f"Камера {cam.width}x{cam.height}, HFOV {cam.hfov_deg}°, дистанция {a.distance} м")
+    print(f"  кадр на фасаде: {fw:.2f} x {fh:.2f} м, {cam.px_per_mm(a.distance):.2f} px/мм")
+    print(f"  модуль, мм | px/модуль | читается | макс. дистанция, м | макс. выдержка при {a.speed} м/с, мс")
+    for m in (0.33, 0.5, 0.75, 1.0):
+        ppm = barcode.px_per_module(cam, a.distance, m)
+        t_max_ms = 0.5 * m / (a.speed * 1000) * 1000 if a.speed > 0 else float("inf")  # смаз <= 0.5 модуля
+        print(f"  {m:10.2f} | {ppm:9.2f} | {'да ' if ppm >= barcode.MIN_PPM else 'НЕТ':8} | "
+              f"{barcode.max_read_distance(cam, m):18.2f} | {t_max_ms:.2f}")
+    blur = barcode.motion_blur_px(cam, a.distance, a.speed, a.exposure_ms / 1000)
+    print(f"  смаз при выдержке {a.exposure_ms} мс: {blur:.2f} px ({a.speed * a.exposure_ms:.2f} мм)")
+
+
+def cmd_reconcile(a) -> None:
+    report = reconcile(load_expected_csv(a.expected), load_observations_csv(a.observations))
+    write_report_csv(report, a.out)
+    print(json.dumps(report.summary(), ensure_ascii=False))
+    print(f"Точность учёта (IRA): {report.accuracy:.1%}; отчёт: {a.out}")
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(prog="invent_core", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    def cam_args(p):
+        d = Camera()
+        p.add_argument("--width", type=int, default=d.width)
+        p.add_argument("--height", type=int, default=d.height)
+        p.add_argument("--hfov", type=float, default=d.hfov_deg)
+        p.add_argument("--vfov", type=float, default=d.vfov_deg)
+
+    p = sub.add_parser("make-layout")
+    p.add_argument("out")
+    p.add_argument("--aisles", type=int, default=2)
+    p.add_argument("--bays", type=int, default=10)
+    p.add_argument("--levels", type=int, default=4)
+    p.add_argument("--aisle-width", type=float, default=3.0)
+    p.add_argument("--name", default="demo")
+    p.set_defaults(func=cmd_make_layout)
+
+    p = sub.add_parser("plan")
+    p.add_argument("layout")
+    p.add_argument("--battery", type=float, default=600.0, help="полётное время на АКБ, с")
+    p.add_argument("--hold", type=float, default=0.0, help="зависание на точке, с (0 — непрерывная съёмка)")
+    p.add_argument("--v-scan", type=float, default=0.4)
+    p.add_argument("--export", help="сохранить маршрут (JSON) для узла миссии")
+    cam_args(p)
+    p.set_defaults(func=cmd_plan)
+
+    p = sub.add_parser("optics")
+    p.add_argument("--distance", type=float, default=1.5, help="до фасада, м")
+    p.add_argument("--speed", type=float, default=0.4, help="м/с")
+    p.add_argument("--exposure-ms", type=float, default=1.0)
+    cam_args(p)
+    p.set_defaults(func=cmd_optics)
+
+    p = sub.add_parser("reconcile")
+    p.add_argument("expected", help="CSV из WMS/1С: адрес;код")
+    p.add_argument("observations", help="CSV наблюдений: address;code;occupied;confidence")
+    p.add_argument("-o", "--out", default="report.csv")
+    p.set_defaults(func=cmd_reconcile)
+
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")  # консоли Windows/Git Bash
+    a = ap.parse_args(argv)
+    a.func(a)

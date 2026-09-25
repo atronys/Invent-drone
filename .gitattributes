@@ -1,0 +1,5 @@
+# Проект собирается на Linux (ROS 2, PX4): всегда LF, иначе bash-скрипты ломаются ('\r': command not found)
+* text=auto eol=lf
+*.sh text eol=lf
+*.pdf binary
+*.png binary

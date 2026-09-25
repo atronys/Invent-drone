@@ -1,0 +1,22 @@
+# литература — не публикуем (авторское право) и не раздуваем репозиторий
+books/*.pdf
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+
+# ROS 2
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+ros2_ws/src/px4_msgs/
+
+# генерируемое
+sim/worlds/
+report.csv
+*.bag
+rosbag2_*/
+ml/datasets/

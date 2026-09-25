@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "invent-core"
+version = "0.1.0"
+description = "Ядро INVENT_DRONE: модель склада, планирование облёта, привязка этикеток, сверка с WMS"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+barcode = ["zxing-cpp>=2.2", "numpy"]
+sim = ["python-barcode", "pillow"]
+yaml = ["pyyaml"]
+dev = ["pytest"]
+
+[project.scripts]
+invent = "invent_core.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["invent_core*"]
