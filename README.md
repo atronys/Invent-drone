@@ -13,18 +13,23 @@
 | 01 | [Продукт и рынок](docs/01_product_and_market.md) | Corvus как референс, боль, сегменты РФ, юнит-экономика, регуляторика, гранты, custdev |
 | 02 | [Архитектура](docs/02_architecture.md) | Система, ADR, оптика этикеток, планирование, безопасность |
 | 03 | [Дорожная карта](docs/03_roadmap.md) | Фазы Ф0–Ф5 с датами, Go/No-go, KPI, критический путь, анти-цели |
-| 04 | [**Backlog**](docs/04_backlog.md) | 116 задач: ID, приоритет, оценка, фаза, критерий готовности. **Начинать отсюда** |
+| 04 | [**Backlog**](docs/04_backlog.md) | 120 задач: ID, приоритет, оценка, фаза, критерий готовности; ✅/🔧 — что уже сделано. **Начинать отсюда** |
 | 05 | [Железо](docs/05_hardware_bom.md) | Состав прототипа v1 (РФ), лаборатория |
 | 06 | [Риски](docs/06_risks.md) | Реестр рисков и мер |
 | 07 | [План ВКР](docs/07_thesis_plan.md) | Тема, новизна, структура, эксперименты, публикации |
+| — | [Custdev](docs/custdev/) | Сценарий интервью, чек-лист обследования склада, шаблон контактов |
+| — | [Эксперимент LOC-08](research/landmark_ekf/README.md) | EKF-локализация по этикеткам: результаты и выводы |
 
 ## Структура репозитория
 
 ```
-core/          ядро на чистом Python (без ROS): модель склада, планировщик облёта, оптика,
-               привязка этикетки к ячейке, разбор GS1, сверка с WMS; 22 теста
-sim/           генератор мира Gazebo из раскладки + истина + WMS с внесёнными ошибками
-ros2_ws/src/   ROS 2 Jazzy: invent_msgs, invent_mission (PX4 Offboard), invent_perception, invent_bringup
+core/          ядро на Python (без ROS): модель склада, планировщик облёта и перескана, камера с дисторсией,
+               кадры/повороты, 6-DoF привязка этикетки к ячейке, PnP, GS1, сверка с WMS
+sim/           генератор мира Gazebo (паллетные и адресные этикетки, сценарии) + истина + WMS с ошибками + метрики
+research/      прототипы для диплома: landmark_ekf — локализация по этикеткам (EKF по книге Gao & Zhang)
+tools/         calibrate_camera.py — калибровка по шахматке -> ROS camera_info
+ros2_ws/src/   ROS 2 Jazzy: invent_msgs, invent_mission (PX4 Offboard), invent_perception
+               (label_reader с адресом по TF, scan_recorder), invent_bringup
 scripts/       setup_ubuntu.sh — вся среда одной командой (ROS 2, PX4 SITL, Gazebo, XRCE-агент)
 docker/        slambook — изолированная среда для упражнений из книги Gao & Zhang
 backend/ ml/ hardware/   заготовки на Ф2–Ф3 (README с планом)
@@ -38,12 +43,18 @@ books/         литература (не в git)
 
 ```bash
 cd core
-python -m unittest discover -s tests                        # 22 теста
+python -m unittest discover -s tests                        # тесты ядра (PnP-тесты нужны numpy+opencv)
 python -m invent_core plan examples/warehouse_demo.json      # план облёта: вылеты, ячеек/час
+python -m invent_core plan examples/warehouse_demo.json --only rescan.csv   # перескан адресов
 python -m invent_core optics --distance 1.5 --hfov 29.4 --vfov 22.2   # читается ли этикетка
+python -m invent_core label-pose photo.jpg --camera cam.yaml # дистанция до этикетки по фото (PnP)
 python -m invent_core make-layout my_wh.json --aisles 4 --bays 20 --levels 5
 python -m invent_core reconcile wms.csv observations.csv -o report.csv
+cd .. && python research/landmark_ekf/ekf_sim.py --seeds 10 --plot   # эксперимент LOC-08
 ```
+
+Все тесты (их же гоняет хук перед коммитом): `core/tests`, `sim/tests`, `tools/tests`, `research/tests` —
+54 теста, на Python 3.10 с numpy и OpenCV.
 
 Симуляция и ROS 2 — на Ubuntu 24.04: `bash scripts/setup_ubuntu.sh`, затем [sim/README.md](sim/README.md).
 

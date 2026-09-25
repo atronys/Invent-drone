@@ -5,7 +5,7 @@
 # Время ~1–2 ч, место ~25 ГБ, нужен sudo. Скрипт можно перезапускать: готовые шаги пропускаются.
 set -eo pipefail
 
-PX4_VERSION="${PX4_VERSION:-v1.16.0}"            # проверь актуальный стабильный релиз на github.com/PX4/PX4-Autopilot/releases
+PX4_VERSION="${PX4_VERSION:-v1.17.0}"            # последний стабильный на 26.09.2026; px4_msgs берётся из release/1.17
 XRCE_AGENT_VERSION="${XRCE_AGENT_VERSION:-v2.4.3}"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${SRC:-$HOME/src}"

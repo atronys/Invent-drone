@@ -43,9 +43,12 @@ class MissionNode(Node):
         self.declare_parameter("sortie", 0)
         self.declare_parameter("rate_hz", 20.0)
         self.declare_parameter("acceptance_radius", 0.15)
-        # PX4 >= 1.16 версионирует сообщения: может быть /fmu/out/vehicle_status_v1 — проверь `ros2 topic list`
-        self.declare_parameter("vehicle_status_topic", "/fmu/out/vehicle_status")
-        self.declare_parameter("local_position_topic", "/fmu/out/vehicle_local_position")
+        # PX4 >= 1.16: к топику добавляется суффикс _v<N>, если MESSAGE_VERSION != 0
+        # (PX4 v1.17.0, src/modules/uxrce_dds_client/utilities.hpp, generate_topic_name).
+        # VehicleStatus и VehicleLocalPosition — версия 1; TrajectorySetpoint, VehicleCommand — 0 (без суффикса).
+        # Пример px4_ros_com в main использует старые имена — он устарел. Проверка: `ros2 topic list | grep fmu`.
+        self.declare_parameter("vehicle_status_topic", "/fmu/out/vehicle_status_v1")
+        self.declare_parameter("local_position_topic", "/fmu/out/vehicle_local_position_v1")
 
         wh = Warehouse.load(self.get_parameter("layout").value)
         params_file = self.get_parameter("scan_params").value
