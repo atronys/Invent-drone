@@ -4,11 +4,15 @@
 
 ```bash
 python3 sim/generate_world.py core/examples/warehouse_demo.json -o sim/worlds/demo
-# -> warehouse.sdf, truth.csv (истина), wms_expected.csv (WMS с внесёнными ошибками), labels/*.png
+# -> warehouse.sdf, truth.csv (истина), wms_expected.csv (WMS с внесёнными ошибками),
+#    address_labels.csv (адресные этикетки — карта ориентиров для LOC-08), labels/*.png
 ```
 
 Параметры: `--occupancy 0.8` (заполненность), `--wms-errors 0.03` (ошибки учёта), `--module-mm 0.5`
 (ширина модуля штрихкода — как на реальных SSCC-этикетках), `--seed`.
+Сценарии (SIM-06): `--damaged 0.3` (доля повреждённых этикеток; при 0.3 читается ≈70% текстур),
+`--rotate-max 8` (наклон этикеток, град), `--obstacle` (препятствие в первом проходе — для SAFE-01),
+`--ambient 0.2` (тёмный склад).
 
 ## 2. Запустить PX4 SITL в этом мире
 
@@ -29,11 +33,18 @@ ros2 launch invent_bringup sim_mission.launch.py layout:=$HOME/INVENT_DRONE/core
 ```
 
 Проверки: `ros2 topic list | grep fmu` (мост PX4 жив), `ros2 topic echo /mission/status`.
+Узел `scan_recorder` по окончании вылета пишет `~/invent_runs/<время>_sortie<N>.csv`.
+
+## 4. Метрики и сверка
+
+```bash
+python3 sim/eval_read_rate.py sim/worlds/demo/truth.csv ~/invent_runs/<файл>.csv   # read rate, атрибуция
+python3 -m invent_core reconcile sim/worlds/demo/wms_expected.csv ~/invent_runs/<файл>.csv -o report.csv
+```
 
 ## Что дальше (backlog)
 
 - SIM-03: модель дрона с двумя боковыми камерами + `ros_gz_bridge` изображений в ROS 2;
-- SIM-04: метрика read rate по `truth.csv`;
 - SIM-05: полёт **без GPS** (`EKF2_GPS_CTRL=0`) на внешней одометрии — сначала ground truth с шумом, потом VIO.
 
 Пока GPS в SITL включён — это нормально только для самой первой отладки маршрута.
