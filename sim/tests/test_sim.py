@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "sim"))
 sys.path.insert(0, str(ROOT / "core"))
 
 import eval_read_rate as ev  # noqa: E402
+import make_drone_model  # noqa: E402,F401
 import generate_world as gw  # noqa: E402
 from invent_core.layout import make_grid_warehouse  # noqa: E402
 from invent_core.reconcile import Observation, Status, reconcile  # noqa: E402
@@ -79,3 +80,42 @@ class TestReadRate(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDroneModel(unittest.TestCase):
+    """SIM-03: модель x500_invent согласована с ядром (камера, установка, калибровка)."""
+
+    def build(self, tilt=0.0):
+        import make_drone_model as md
+        from invent_core.camera import Camera
+        return md, md.build(Camera(1920, 1080, 30.0, 17.5), rate=2.0, tilt_down_deg=tilt)
+
+    def test_sdf_and_camera_info(self):
+        import math
+        md, files = self.build()
+        root = ET.fromstring(files["model.sdf"])
+        sensors = {s.get("name"): s for s in root.iter("sensor")}
+        self.assertEqual(set(sensors), {"label_cam_left", "label_cam_right"})
+        for s in sensors.values():
+            self.assertAlmostEqual(float(s.find("camera/horizontal_fov").text), math.radians(30.0), places=5)
+            self.assertTrue(s.find("gz_frame_id").text.endswith("_link"))
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "camera_left.yaml"
+            p.write_text(files["camera_left.yaml"], encoding="utf-8")
+            from invent_core.camera import Camera
+            cam = Camera.load(p)
+        self.assertAlmostEqual(cam.hfov_deg, 30.0, places=4)
+        self.assertEqual((cam.cx, cam.cy), (960.0, 540.0))
+        self.assertIn('"/camera/left/image_raw"', files["bridge.yaml"])
+        self.assertIn('"/clock"', files["bridge.yaml"])
+
+    def test_mounts_match_core(self):
+        import json
+        from invent_core import frames as fr
+        for tilt in (0.0, 15.0):
+            _, files = self.build(tilt)
+            for m in json.loads(files["mounts.json"])["cameras"]:
+                roll, pitch, yaw = m["rpy"]
+                r = fr.matmul(fr.euler_zyx(yaw, pitch, roll), fr.R_LINK_OPTICAL)   # SDF rpy = Rz·Ry·Rx
+                ref = fr.camera_mount(m["look"], tilt)
+                self.assertTrue(all(abs(r[i][j] - ref[i][j]) < 1e-9 for i in range(3) for j in range(3)), m["look"])

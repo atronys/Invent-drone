@@ -21,12 +21,9 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from invent_core import barcode
 from invent_core.association import locate_in_warehouse
 from invent_core.camera import Camera
-from invent_core.frames import matmul, matrix_from_quat
+from invent_core.frames import R_LINK_OPTICAL, matmul, matrix_from_quat
 from invent_core.layout import Warehouse
 from invent_msgs.msg import LabelRead
-
-# звено камеры (x вперёд, y влево, z вверх) -> оптический кадр (z вперёд, x вправо, y вниз)
-R_LINK_OPTICAL = ((0.0, 0.0, 1.0), (-1.0, 0.0, 0.0), (0.0, -1.0, 0.0))
 
 
 class LabelReader(Node):

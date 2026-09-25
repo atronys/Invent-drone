@@ -1,13 +1,19 @@
-"""Сквозной запуск в симуляции (PX4 SITL + Gazebo уже запущены, см. sim/README.md).
+"""Сквозной запуск в симуляции (PX4 SITL + Gazebo с моделью x500_invent уже запущены, см. sim/README.md).
 
     ros2 launch invent_bringup sim_mission.launch.py \
         layout:=$HOME/INVENT_DRONE/core/examples/warehouse_demo.json \
         scan_params:=$HOME/INVENT_DRONE/core/examples/scan_params.json
+
+Запускает: MicroXRCEAgent, мост ros_gz (камеры, depth, /clock), odom_tf (TF дрона и камер),
+mission_node, два label_reader (левая и правая камеры), scan_recorder.
+Восприятие и TF работают на времени симуляции (/clock), чтобы метки времени кадров и TF совпадали.
 """
+import os
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -15,28 +21,35 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description():
     # строки явно типизируем: иначе launch парсит значение как YAML и пустая строка становится None
     text = lambda name: ParameterValue(LaunchConfiguration(name), value_type=str)  # noqa: E731
-    layout = text("layout")
     arg = lambda name, default, doc: DeclareLaunchArgument(name, default_value=default, description=doc)  # noqa: E731
+    layout = text("layout")
+    model_dir = LaunchConfiguration("model_dir")
+    in_model = lambda name: ParameterValue(PathJoinSubstitution([model_dir, name]), value_type=str)  # noqa: E731
+    sim_time = {"use_sim_time": True}
+
+    readers = [
+        Node(package="invent_perception", executable="label_reader", name=f"label_reader_{side}", output="screen",
+             remappings=[("image", f"/camera/{side}/image_raw")],
+             parameters=[{"layout": layout, "camera_info": in_model(f"camera_{side}.yaml"),
+                          "frame_is_optical": False}, sim_time])
+        for side in ("left", "right")
+    ]
     return LaunchDescription([
         DeclareLaunchArgument("layout", description="JSON-раскладка склада (invent_core)"),
         arg("scan_params", "", "JSON ScanParams; пусто — по умолчанию"),
         arg("sortie", "0", "номер вылета в плане"),
-        arg("image", "/camera/left/image_raw", "топик боковой камеры"),
-        arg("camera_info", "", "YAML калибровки боковой камеры"),
-        arg("frame_is_optical", "false", "кадр изображения оптический? (камеры Gazebo — нет)"),
+        arg("model_dir", os.path.expanduser("~/INVENT_DRONE/sim/models/x500_invent"),
+            "каталог модели от sim/make_drone_model.py (bridge.yaml, mounts.json, camera_*.yaml)"),
         arg("agent", "true", "запускать MicroXRCEAgent"),
         ExecuteProcess(cmd=["MicroXRCEAgent", "udp4", "-p", "8888"], output="screen",
                        condition=IfCondition(LaunchConfiguration("agent"))),
-        Node(
-            package="invent_mission", executable="mission_node", output="screen",
-            parameters=[{"layout": layout, "scan_params": text("scan_params"),
-                         "sortie": ParameterValue(LaunchConfiguration("sortie"), value_type=int)}],
-        ),
-        Node(
-            package="invent_perception", executable="label_reader", output="screen",
-            remappings=[("image", LaunchConfiguration("image"))],
-            parameters=[{"layout": layout, "camera_info": text("camera_info"),
-                         "frame_is_optical": ParameterValue(LaunchConfiguration("frame_is_optical"), value_type=bool)}],
-        ),
+        Node(package="ros_gz_bridge", executable="parameter_bridge", name="gz_bridge", output="screen",
+             parameters=[{"config_file": in_model("bridge.yaml")}]),
+        Node(package="invent_mission", executable="odom_tf", output="screen",
+             parameters=[{"layout": layout, "mounts_file": in_model("mounts.json")}, sim_time]),
+        Node(package="invent_mission", executable="mission_node", output="screen",
+             parameters=[{"layout": layout, "scan_params": text("scan_params"),
+                          "sortie": ParameterValue(LaunchConfiguration("sortie"), value_type=int)}]),
+        *readers,
         Node(package="invent_perception", executable="scan_recorder", output="screen"),
     ])

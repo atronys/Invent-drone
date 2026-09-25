@@ -49,6 +49,24 @@ def px4_to_map(p_ned: Vec3, dock: Vec3) -> Vec3:
     return e + dock[0], n + dock[1], u + dock[2]
 
 
+# --- позы PX4 <-> map ---------------------------------------------------------------
+# VehicleOdometry PX4: q — поворот тела FRD относительно NED (w, x, y, z). В map (ENU) тело — FLU (REP-103).
+R_ENU_NED = ((0.0, 1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, -1.0))
+R_FRD_FLU = ((1.0, 0.0, 0.0), (0.0, -1.0, 0.0), (0.0, 0.0, -1.0))   # обе матрицы симметричны и сами себе обратны
+
+
+def px4_pose_to_map(pos_ned: Vec3, q_ned_frd: tuple[float, float, float, float], dock: Vec3):
+    """Поза из /fmu/out/vehicle_odometry -> (p_map, q_map_flu (w, x, y, z)) для TF map->base_link."""
+    r = matmul(R_ENU_NED, matmul(matrix_from_quat(*q_ned_frd), R_FRD_FLU))
+    return px4_to_map(pos_ned, dock), quat_from_matrix(r)
+
+
+def map_pose_to_px4(p_map: Vec3, q_map_flu: tuple[float, float, float, float], dock: Vec3):
+    """Обратное: поза в map (например, от VIO) -> (pos_ned, q_ned_frd) для /fmu/in/vehicle_visual_odometry (LOC-04)."""
+    r = matmul(R_ENU_NED, matmul(matrix_from_quat(*q_map_flu), R_FRD_FLU))
+    return map_to_px4(p_map, dock), quat_from_matrix(r)
+
+
 # --- матрицы поворота -------------------------------------------------------------
 
 def matmul(a: Mat3, b: Mat3) -> Mat3:
@@ -107,6 +125,11 @@ def matrix_from_quat(w: float, x: float, y: float, z: float) -> Mat3:
     return ((1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)),
             (2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)),
             (2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)))
+
+
+# Кадр звена камеры в Gazebo/ROS (x — по оси камеры, y влево, z вверх) -> оптический кадр книги
+# (z по оси, x вправо, y вниз). Столбцы — оптические оси в кадре звена.
+R_LINK_OPTICAL = ((0.0, 0.0, 1.0), (-1.0, 0.0, 0.0), (0.0, -1.0, 0.0))
 
 
 # --- установка камер на дроне -----------------------------------------------------

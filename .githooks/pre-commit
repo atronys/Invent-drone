@@ -5,7 +5,10 @@ ROOT="$(git rev-parse --show-toplevel)"
 # Выбор интерпретатора: сначала тот, где есть numpy (нужен research/ и tools/), иначе любой >= 3.10.
 # На Windows python3 бывает заглушкой Microsoft Store или отдельной версией без пакетов.
 PY=""
-for need in "import numpy" ""; do
+for c in "$ROOT/.venv/Scripts/python.exe" "$ROOT/.venv/bin/python"; do   # сначала окружение проекта
+  [ -x "$c" ] && PY="$c" && break
+done
+[ -n "$PY" ] || for need in "import numpy" ""; do
   for c in python3 python; do
     if "$c" -c "import sys; assert sys.version_info >= (3, 10); $need" 2>/dev/null; then PY="$c"; break 2; fi
   done

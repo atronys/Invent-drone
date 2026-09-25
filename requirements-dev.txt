@@ -1,0 +1,10 @@
+# Для разработки ядра, симуляции и исследований на ПК (Windows/Linux). ROS 2 ставится отдельно.
+#   python -m venv .venv && .venv/Scripts/python -m pip install -r requirements-dev.txt   (Windows)
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt               (Linux)
+numpy>=1.24
+opencv-python>=4.8
+matplotlib>=3.7
+zxing-cpp>=2.2
+python-barcode>=0.15
+pillow>=10.0
+pyyaml>=6.0

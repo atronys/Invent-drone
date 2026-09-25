@@ -68,6 +68,33 @@ class TestFrames(unittest.TestCase):
         self.assertEqual(tuple(m[i][0] for i in range(3)), (1.0, 0.0, 0.0))    # «вправо» в кадре = вперёд
 
 
+class TestPx4Pose(unittest.TestCase):
+    def test_heading_north_is_enu_yaw_90(self):
+        p, q = fr.px4_pose_to_map((0.0, 0.0, -1.0), (1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+        self.assertEqual(p, (0.0, 0.0, 1.0))
+        r = fr.matrix_from_quat(*q)
+        self.assertAlmostEqual(math.atan2(r[1][0], r[0][0]), math.pi / 2)   # нос на север = +y ENU
+        self.assertAlmostEqual(r[2][2], 1.0)                                 # z тела вверх
+
+    def test_roundtrip_random(self):
+        rng = random.Random(5)
+        dock = (-2.0, 2.6, 0.0)
+        for _ in range(50):
+            q = fr.quat_from_matrix(fr.euler_zyx(rng.uniform(-3, 3), rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5)))
+            pos = (rng.uniform(-5, 5), rng.uniform(-5, 5), rng.uniform(-3, 0))
+            pm, qm = fr.px4_pose_to_map(pos, q, dock)
+            pn, qn = fr.map_pose_to_px4(pm, qm, dock)
+            self.assertTrue(all(abs(a - b) < 1e-9 for a, b in zip(pn, pos)))
+            same = all(abs(a - b) < 1e-9 for a, b in zip(qn, q)) or all(abs(a + b) < 1e-9 for a, b in zip(qn, q))
+            self.assertTrue(same)
+
+    def test_yaw_consistent_with_heading_conversion(self):
+        for psi_ned in (0.0, 0.7, -2.0):
+            _, q = fr.px4_pose_to_map((0, 0, 0), fr.quat_from_matrix(fr.rot_z(psi_ned)), (0, 0, 0))
+            r = fr.matrix_from_quat(*q)
+            self.assertAlmostEqual(fr.wrap(math.atan2(r[1][0], r[0][0]) - fr.yaw_ned_to_enu(psi_ned)), 0.0)
+
+
 class TestCamera(unittest.TestCase):
     def test_distortion_roundtrip(self):
         cam = Camera.from_intrinsics(1920, 1080, 1400, 1400, 960, 540, (-0.28, 0.07, 1e-4, -2e-4, 0.0))

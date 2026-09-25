@@ -14,23 +14,35 @@ python3 sim/generate_world.py core/examples/warehouse_demo.json -o sim/worlds/de
 `--rotate-max 8` (наклон этикеток, град), `--obstacle` (препятствие в первом проходе — для SAFE-01),
 `--ambient 0.2` (тёмный склад).
 
-## 2. Запустить PX4 SITL в этом мире
+## 2. Модель дрона и запуск PX4 SITL (SIM-03)
 
 ```bash
+# модель x500_invent: PX4 x500 + OakD-Lite (depth) + две боковые камеры этикеток с оптикой из ScanParams
+python3 sim/make_drone_model.py -o sim/models --params core/examples/scan_params.json
+cp -r sim/models/x500_invent $PX4_DIR/Tools/simulation/gz/models/
 cp sim/worlds/demo/warehouse.sdf $PX4_DIR/Tools/simulation/gz/worlds/warehouse.sdf
-cd $PX4_DIR
-PX4_GZ_WORLD=warehouse PX4_GZ_MODEL_POSE="-2,2.6,0.1,0,0,0" make px4_sitl gz_x500_depth
+
+cd $PX4_DIR && make px4_sitl          # один раз — сборка
+PX4_SYS_AUTOSTART=4001 PX4_SIM_MODEL=gz_x500_invent PX4_GZ_WORLD=warehouse PX4_GZ_MODEL_POSE="-2,2.6,0.1,0,0,0" ./build/px4_sitl_default/bin/px4
 ```
 
-`PX4_GZ_MODEL_POSE` = док из раскладки (`dock` в JSON). Кадр Gazebo world = наш кадр `map`,
-поэтому координаты плана и симуляции совпадают — отладка тривиальна.
+- Airframe 4001 (x500) задаёт `PX4_SIM_MODEL` только если переменная пуста, а `px4-rc.gzsim` берёт модель
+  из `models/<имя без gz_>/model.sdf` — поэтому своя модель подключается без правки airframe
+  (проверено по исходникам PX4 v1.17.0).
+- `PX4_GZ_MODEL_POSE` = док из раскладки (`dock` в JSON). Кадр Gazebo world = наш `map`.
+- 12 Мп × 2 камеры тяжелы для рендера: на слабой видеокарте `--width 2028 --height 1520 --hfov 25`
+  (px/мм на фасаде почти как у 12 Мп с HFOV 50°) или `--rate 1`.
 
 ## 3. Запустить миссию
 
 ```bash
 # в новом терминале (окружение из ~/.bashrc, см. scripts/setup_ubuntu.sh)
-ros2 launch invent_bringup sim_mission.launch.py layout:=$HOME/INVENT_DRONE/core/examples/warehouse_demo.json
+ros2 launch invent_bringup sim_mission.launch.py layout:=$HOME/INVENT_DRONE/core/examples/warehouse_demo.json     model_dir:=$HOME/INVENT_DRONE/sim/models/x500_invent
 ```
+
+Launch поднимает мост ros_gz (камеры, depth, `/clock`), `odom_tf` (TF `map→base_link` из
+`/fmu/out/vehicle_odometry` + статические TF камер), узел миссии, два `label_reader` и `scan_recorder`.
+Проверка TF: `ros2 run tf2_ros tf2_echo map label_cam_left_link`.
 
 Проверки: `ros2 topic list | grep fmu` (мост PX4 жив), `ros2 topic echo /mission/status`.
 Узел `scan_recorder` по окончании вылета пишет `~/invent_runs/<время>_sortie<N>.csv`.
@@ -44,7 +56,6 @@ python3 -m invent_core reconcile sim/worlds/demo/wms_expected.csv ~/invent_runs/
 
 ## Что дальше (backlog)
 
-- SIM-03: модель дрона с двумя боковыми камерами + `ros_gz_bridge` изображений в ROS 2;
 - SIM-05: полёт **без GPS** (`EKF2_GPS_CTRL=0`) на внешней одометрии — сначала ground truth с шумом, потом VIO.
 
 Пока GPS в SITL включён — это нормально только для самой первой отладки маршрута.

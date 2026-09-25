@@ -16,5 +16,8 @@ setup(
     maintainer_email="todo@example.com",
     description="Миссия облёта склада: план invent_core -> PX4 Offboard",
     license="Proprietary",
-    entry_points={"console_scripts": ["mission_node = invent_mission.mission_node:main"]},
+    entry_points={"console_scripts": [
+        "mission_node = invent_mission.mission_node:main",
+        "odom_tf = invent_mission.odom_tf_node:main",
+    ]},
 )
