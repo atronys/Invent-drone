@@ -4,6 +4,7 @@
   plan         план облёта: пролёты, вылеты, время, ячеек/час
   optics       проверка оптики: читается ли этикетка на дистанции и скорости
   reconcile    сверка наблюдений с выгрузкой WMS/1С -> CSV-отчёт
+  label-pose   дистанция до этикетки по фото (PnP), упражнение LEARN-07
 """
 from __future__ import annotations
 
@@ -82,6 +83,41 @@ def cmd_optics(a) -> None:
     print(f"  смаз при выдержке {a.exposure_ms} мс: {blur:.2f} px ({a.speed * a.exposure_ms:.2f} мм)")
 
 
+def cmd_label_pose(a) -> None:
+    """LEARN-07: дистанция до этикетки по фото (PnP) — сверить с рулеткой."""
+    import math
+
+    import cv2
+
+    from .pnp import detect_label_quad, label_pose
+    img = cv2.imread(a.image)
+    if img is None:
+        raise SystemExit(f"не удалось открыть {a.image}")
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+    if a.camera:
+        cam = Camera.load(a.camera)
+        if (cam.width, cam.height) != (w, h):
+            print(f"ВНИМАНИЕ: калибровка {cam.width}x{cam.height}, а снимок {w}x{h} — снимайте в том же режиме")
+    else:
+        vfov = math.degrees(2 * math.atan(math.tan(math.radians(a.hfov) / 2) * h / w))
+        cam = Camera(w, h, a.hfov, vfov)
+        print(f"калибровки нет: HFOV {a.hfov}° — грубая оценка; для LEARN-07 откалибруйте камеру (tools/calibrate_camera.py)")
+    quad = detect_label_quad(gray)
+    if quad is None:
+        raise SystemExit("этикетка не найдена: нужен светлый прямоугольник на более тёмном фоне целиком в кадре")
+    pose = label_pose(quad, cam, (a.size[0], a.size[1]))
+    x, y, z = pose.t
+    print(f"дистанция до центра этикетки: {pose.distance:.3f} м (x={x:+.3f}, y={y:+.3f}, z={z:.3f} м)")
+    print(f"ошибка репроекции: {pose.reproj_rmse_px:.2f} px; углы: {quad.round(1).tolist()}")
+    if a.out:
+        cv2.polylines(img, [quad.astype("int32").reshape(-1, 1, 2)], True, (0, 0, 255), max(2, w // 400))
+        cv2.putText(img, f"{pose.distance:.3f} m", tuple(int(v) for v in quad[0]), cv2.FONT_HERSHEY_SIMPLEX,
+                    max(1, w // 800), (0, 0, 255), max(2, w // 400))
+        cv2.imwrite(a.out, img)
+        print(f"разметка: {a.out}")
+
+
 def cmd_reconcile(a) -> None:
     report = reconcile(load_expected_csv(a.expected), load_observations_csv(a.observations))
     write_report_csv(report, a.out)
@@ -126,6 +162,14 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--exposure-ms", type=float, default=1.0)
     cam_args(p)
     p.set_defaults(func=cmd_optics)
+
+    p = sub.add_parser("label-pose", help="дистанция до этикетки по фото (LEARN-07)")
+    p.add_argument("image")
+    p.add_argument("--camera", help="YAML калибровки (tools/calibrate_camera.py)")
+    p.add_argument("--hfov", type=float, default=70.0, help="если нет калибровки: угол обзора, град")
+    p.add_argument("--size", type=float, nargs=2, default=(0.148, 0.105), help="ширина и высота этикетки, м")
+    p.add_argument("--out", help="сохранить снимок с разметкой")
+    p.set_defaults(func=cmd_label_pose)
 
     p = sub.add_parser("reconcile")
     p.add_argument("expected", help="CSV из WMS/1С: адрес;код")
