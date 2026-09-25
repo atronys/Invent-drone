@@ -79,6 +79,11 @@ def cmd_optics(a) -> None:
         t_max_ms = 0.5 * m / (a.speed * 1000) * 1000 if a.speed > 0 else float("inf")  # смаз <= 0.5 модуля
         print(f"  {m:10.2f} | {ppm:9.2f} | {'да ' if ppm >= barcode.MIN_PPM else 'НЕТ':8} | "
               f"{barcode.max_read_distance(cam, m):18.2f} | {t_max_ms:.2f}")
+    spread = 0.56  # адресная этикетка на балке (-0.06) и паллетная (+0.5) — как в RackRow по умолчанию
+    need = barcode.required_vertical_px(spread, 0.5)
+    print(f"  чтобы в кадре были адресная и паллетная этикетки (разнос {spread} м) при модуле 0.5 мм, нужно "
+          f">= {need:.0f} px по вертикали; у камеры {cam.height} px -> "
+          f"{'хватает' if cam.height >= need else 'НЕ хватает: портретная установка или больше Мп'}")
     blur = barcode.motion_blur_px(cam, a.distance, a.speed, a.exposure_ms / 1000)
     print(f"  смаз при выдержке {a.exposure_ms} мс: {blur:.2f} px ({a.speed * a.exposure_ms:.2f} мм)")
 

@@ -40,6 +40,8 @@ class ScanParams:
     battery_s: float = 600.0         # полётное время на одной АКБ
     reserve: float = 0.25            # резерв АКБ
     turnaround_s: float = 120.0      # замена/зарядка АКБ между вылетами
+    cover_address_labels: bool = False  # держать в кадре и адресные этикетки на балках (ориентиры LOC-11)
+    camera_z_offset: float = 0.12    # боковые камеры выше центра дрона (sim/make_drone_model.py, крепление)
 
     @classmethod
     def load(cls, path: str | Path) -> "ScanParams":
@@ -154,28 +156,33 @@ def _aisle_passes(wh: Warehouse, aisle: Aisle, p: ScanParams, direction: int):
     fp_w, fp_h = p.camera.footprint(dist)
     band, step = fp_h * (1 - p.view_margin), fp_w * (1 - p.view_margin)
     locs = [loc for r in rows for loc in r.locations()]
+    addr_zs = sorted({r.address_z(lv) for r in rows for lv in range(1, len(r.level_z) + 1)})         if p.cover_address_labels else []
     x0, x1 = min(r.origin_x for r in rows), max(r.end_x for r in rows)
     n = max(1, math.ceil((x1 - x0) / step))
     spacing = (x1 - x0) / n                             # равномерно, spacing <= step
     xs = [x0 + (k + 0.5) * spacing for k in range(n)]
 
     passes, warnings = [], []
-    for z_center, group in pass_heights([loc.z for loc in locs], band):
-        z = max(z_center, p.min_z)
+    off = p.camera_z_offset
+    for z_center, group in pass_heights([loc.z for loc in locs] + addr_zs, band):
+        z = max(z_center, p.min_z + off)   # z — высота КАМЕР; дрон летит на off ниже, но не ниже min_z
         lost = [g for g in group if abs(g - z) > band / 2 + 1e-9]
         if lost:
             warnings.append(
-                f"проход {aisle.id}: этикетки на высотах {lost} вне полосы обзора при z={z:.2f} "
+                f"проход {aisle.id}: этикетки на высотах {lost} вне полосы обзора при высоте камер {z:.2f} "
                 f"(min_z={p.min_z}); нужен наклон камеры или меньший min_z"
             )
+        if addr_zs and not any(abs(g - z) <= band / 2 + 1e-9 for g in addr_zs) and                 any(abs(loc.z - z) <= band / 2 + 1e-9 for loc in locs):
+            warnings.append(f"проход {aisle.id}, z={z:.2f}: адресные этикетки не в кадре — нет ориентиров "
+                            f"(нужно больше пикселей по вертикали, см. barcode.required_vertical_px)")
         yaw = 0.0 if direction > 0 else math.pi
         wps = []
         for x in xs if direction > 0 else reversed(xs):
             targets = tuple(
                 loc.address for loc in locs if abs(loc.x - x) <= spacing / 2 + 1e-9 and abs(loc.z - z) <= band / 2 + 1e-9
             )
-            wps.append(Waypoint(x, aisle.y, z, yaw, "scan", p.hold_s, targets))
-        passes.append(Pass(aisle.id, z, wps))
+            wps.append(Waypoint(x, aisle.y, z - off, yaw, "scan", p.hold_s, targets))
+        passes.append(Pass(aisle.id, z - off, wps))
         direction = -direction
     return passes, direction, warnings
 

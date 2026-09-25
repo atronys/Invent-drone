@@ -18,6 +18,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 from invent_msgs.msg import MissionStatus
+from std_msgs.msg import String
 from px4_msgs.msg import (OffboardControlMode, TrajectorySetpoint, VehicleCommand,
                           VehicleLocalPosition, VehicleStatus)
 
@@ -73,6 +74,9 @@ class MissionNode(Node):
                                  self.on_position, qos)
         self.create_subscription(VehicleStatus, self.get_parameter("vehicle_status_topic").value,
                                  self.on_status, qos)
+        # SAFE-01/02: GO / SLOW (скорость ×0.5) / STOP (замереть). Нет узла безопасности — считаем GO.
+        self.safety = "GO"
+        self.create_subscription(String, "safety/state", self.on_safety, 10)
 
         self.rate = self.get_parameter("rate_hz").value
         self.acc = self.get_parameter("acceptance_radius").value
@@ -94,6 +98,11 @@ class MissionNode(Node):
 
     def on_status(self, msg: VehicleStatus):
         self.status = msg
+
+    def on_safety(self, msg: String):
+        if msg.data != self.safety:
+            self.get_logger().warn(f"безопасность: {self.safety} -> {msg.data}")
+        self.safety = msg.data
 
     # --- выходы -----------------------------------------------------------
     def now_us(self) -> int:
@@ -128,7 +137,9 @@ class MissionNode(Node):
 
     # --- автомат ----------------------------------------------------------
     def start_segment(self):
-        self.seg_from, self.seg_yaw0, self.seg_t0, self.hold_until = self.carrot, self.carrot_yaw, self.now_s(), None
+        # прогресс копится по тикам (а не по времени), чтобы STOP/SLOW не давали скачков уставки
+        self.seg_from, self.seg_yaw0, self.hold_until = self.carrot, self.carrot_yaw, None
+        self.seg_s, self.seg_yaw_s = 0.0, 0.0
 
     def segment_speed(self) -> float:
         a, b = self.seg_from, self.wps[self.i]
@@ -178,19 +189,24 @@ class MissionNode(Node):
 
     def follow(self):
         target = self.wps[self.i]
-        t = self.now_s() - self.seg_t0
+        factor = {"STOP": 0.0, "SLOW": 0.5}.get(self.safety, 1.0)
+        dt = 1.0 / self.rate
         a, b = self.seg_from, (target.x, target.y, target.z)
         length = math.dist(a, b)
-        speed = self.segment_speed()
-        s = min(length, speed * t)
+        speed = self.segment_speed() * factor
+        self.seg_s = min(length, self.seg_s + speed * dt)
+        self.seg_yaw_s += math.radians(self.p.yaw_rate_deg) * factor * dt
+        s = self.seg_s
         k = s / length if length > 1e-6 else 1.0
         self.carrot = tuple(a[j] + (b[j] - a[j]) * k for j in range(3))
-        vel = tuple((b[j] - a[j]) / length * speed for j in range(3)) if s < length else (0.0, 0.0, 0.0)
+        vel = tuple((b[j] - a[j]) / length * speed for j in range(3)) if 0 < s < length else (0.0, 0.0, 0.0)
 
         dyaw = wrap(target.yaw - self.seg_yaw0)
-        step = math.radians(self.p.yaw_rate_deg) * t
+        step = self.seg_yaw_s
         self.carrot_yaw = target.yaw if abs(dyaw) <= step else self.seg_yaw0 + math.copysign(step, dyaw)
         self.setpoint(self.carrot, self.carrot_yaw, vel)
+        if factor == 0.0:
+            return  # STOP: держим точку, дальше по маршруту не идём
 
         arrived = s >= length and self.pos is not None and math.dist(self.pos, b) < self.acc \
             and abs(wrap(target.yaw - self.carrot_yaw)) < 1e-3

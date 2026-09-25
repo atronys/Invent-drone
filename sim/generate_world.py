@@ -147,7 +147,7 @@ def build(wh: Warehouse, o: Options, out: Path | None = None):
         for loc in row.locations():
             lz = row.level_z[loc.level - 1]
             # адресная этикетка (SIM-07): на лицевой балке яруса, у пола — на отбойнике
-            az = lz - 0.06 if loc.level > 1 else 0.10
+            az = row.address_z(loc.level)
             ay = row.face_y + n * 0.004
             addr_labels.append((loc.address, loc.x, row.face_y, az))
             tex = out / "labels" / f"addr_{loc.address}.png" if textures else None

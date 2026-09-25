@@ -100,3 +100,26 @@ class TestQuaternionAndWarehouseLookup(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAddressLabelsInFrame(unittest.TestCase):
+    """Портретная камера держит в кадре и адресную, и паллетную этикетку; альбомная — нет."""
+
+    def test_required_vertical_px(self):
+        from invent_core import barcode
+        self.assertAlmostEqual(barcode.required_vertical_px(0.56, 0.5), 3500.0)
+        self.assertAlmostEqual(barcode.required_vertical_px(0.56, 1.0), 1750.0)
+
+    def test_portrait_vs_landscape(self):
+        wh = make_grid_warehouse()
+        def warn(cam):
+            pl = plan(wh, ScanParams(camera=cam, cover_address_labels=True, min_z=0.5))
+            return [w for w in pl.warnings if "адресные этикетки не в кадре" in w]
+        landscape, portrait = Camera(4056, 3040, 29.4, 22.2), Camera(3040, 4056, 22.2, 29.4)
+        self.assertGreater(len(warn(landscape)), len(wh.aisles))       # не хватает на верхних ярусах
+        self.assertEqual(len(warn(portrait)), len(wh.aisles))          # только напольный ярус (0.1 м)
+
+    def test_address_z(self):
+        row = make_grid_warehouse().rows[0]
+        self.assertAlmostEqual(row.address_z(1), 0.10)
+        self.assertAlmostEqual(row.address_z(2), 1.74)

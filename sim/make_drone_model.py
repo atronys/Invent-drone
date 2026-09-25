@@ -73,7 +73,7 @@ def gazebo_camera(cam: Camera) -> Camera:
     return Camera.from_intrinsics(cam.width, cam.height, fx, fx, cam.width / 2, cam.height / 2)
 
 
-def mounts(offset_y: float = 0.08, z: float = 0.12, tilt_down_deg: float = 0.0) -> list[dict]:
+def mounts(offset_y: float = 0.08, z: float = ScanParams.camera_z_offset, tilt_down_deg: float = 0.0) -> list[dict]:
     pitch = math.radians(tilt_down_deg)
     return [
         {"look": "left", "name": "label_cam_left", "frame": "label_cam_left_link", "topic": "/camera/left/image_raw",

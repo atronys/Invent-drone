@@ -25,6 +25,16 @@ def max_read_distance(cam: Camera, module_mm: float, min_ppm: float = MIN_PPM) -
     return cam.px_per_mm(1.0) * module_mm / min_ppm  # px_per_mm ~ 1/d
 
 
+def required_vertical_px(spread_m: float, module_mm: float, min_ppm: float = MIN_PPM, margin: float = 0.2) -> float:
+    """Сколько пикселей по вертикали нужно, чтобы в одном кадре были этикетки с разносом по высоте
+    spread_m (адресная на балке + паллетная) и читался модуль module_mm.
+
+    Не зависит от дистанции: высота кадра на фасаде = H / (px/мм), а px/мм задаётся модулем.
+    H >= spread / (1 - margin) · (min_ppm / module_mm) · 1000.
+    """
+    return spread_m / (1 - margin) * (min_ppm / module_mm) * 1000
+
+
 def motion_blur_px(cam: Camera, distance: float, speed: float, exposure_s: float) -> float:
     """Смаз в пикселях при движении вдоль фасада со скоростью speed (м/с)."""
     return speed * exposure_s * 1000 * cam.px_per_mm(distance)

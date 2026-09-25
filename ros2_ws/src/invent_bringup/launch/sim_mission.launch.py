@@ -5,7 +5,7 @@
         scan_params:=$HOME/INVENT_DRONE/core/examples/scan_params.json
 
 Запускает: MicroXRCEAgent, мост ros_gz (камеры, depth, /clock), odom_tf (TF дрона и камер),
-mission_node, два label_reader (левая и правая камеры), scan_recorder.
+safety_monitor (depth + геозона -> GO/SLOW/STOP), mission_node, два label_reader, scan_recorder.
 Восприятие и TF работают на времени симуляции (/clock), чтобы метки времени кадров и TF совпадали.
 """
 import os
@@ -47,6 +47,8 @@ def generate_launch_description():
              parameters=[{"config_file": in_model("bridge.yaml")}]),
         Node(package="invent_mission", executable="odom_tf", output="screen",
              parameters=[{"layout": layout, "mounts_file": in_model("mounts.json")}, sim_time]),
+        Node(package="invent_mission", executable="safety_monitor", output="screen",
+             remappings=[("depth", "/depth_camera")], parameters=[{"layout": layout}, sim_time]),
         Node(package="invent_mission", executable="mission_node", output="screen",
              parameters=[{"layout": layout, "scan_params": text("scan_params"),
                           "sortie": ParameterValue(LaunchConfiguration("sortie"), value_type=int)}]),

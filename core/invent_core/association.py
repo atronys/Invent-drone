@@ -36,19 +36,25 @@ def locate_label_pose(u: float, v: float, cam: Camera, r_map_cam: Mat3, t_map_ca
     return row.locate(*p) if p else None
 
 
-def locate_in_warehouse(u: float, v: float, cam: Camera, r_map_cam: Mat3, t_map_cam: Vec3,
-                        wh: Warehouse, max_range: float = 4.0) -> str | None:
-    """Адрес для пикселя без знания ряда: ближайший фасад, в который попадает луч."""
+def face_point_in_warehouse(u: float, v: float, cam: Camera, r_map_cam: Mat3, t_map_cam: Vec3,
+                            wh: Warehouse, max_range: float = 4.0) -> tuple[RackRow, float, float] | None:
+    """Ближайший фасад, в который попадает луч пикселя: (ряд, x, z) или None."""
     best, best_d = None, max_range
     for row in wh.rows:
         d = abs(t_map_cam[1] - row.face_y)
         if d >= best_d:
             continue
         p = pixel_to_face_pose(u, v, cam, r_map_cam, t_map_cam, row)
-        addr = row.locate(*p) if p else None
-        if addr:
-            best, best_d = addr, d
+        if p and row.origin_x <= p[0] < row.end_x:
+            best, best_d = (row, p[0], p[1]), d
     return best
+
+
+def locate_in_warehouse(u: float, v: float, cam: Camera, r_map_cam: Mat3, t_map_cam: Vec3,
+                        wh: Warehouse, max_range: float = 4.0) -> str | None:
+    """Адрес для пикселя без знания ряда: ближайший фасад, в который попадает луч."""
+    hit = face_point_in_warehouse(u, v, cam, r_map_cam, t_map_cam, wh, max_range)
+    return hit[0].locate(hit[1], hit[2]) if hit else None
 
 
 def project_to_image(p_map: Vec3, cam: Camera, r_map_cam: Mat3, t_map_cam: Vec3) -> tuple[float, float] | None:

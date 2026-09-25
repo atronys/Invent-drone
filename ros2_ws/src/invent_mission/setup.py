@@ -19,5 +19,6 @@ setup(
     entry_points={"console_scripts": [
         "mission_node = invent_mission.mission_node:main",
         "odom_tf = invent_mission.odom_tf_node:main",
+        "safety_monitor = invent_mission.safety_node:main",
     ]},
 )

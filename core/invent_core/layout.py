@@ -37,6 +37,8 @@ class RackRow:
     slots_per_bay: int = 3
     level_z: list[float] = field(default_factory=lambda: [0.0, 1.8, 3.6, 5.4])
     label_height: float = 0.5       # высота паллетной этикетки над балкой (GS1: 0.4–0.8 м от низа паллеты)
+    address_offset: float = -0.06   # адресная этикетка: на лицевой балке яруса, центр на 6 см ниже её верха
+    floor_address_z: float = 0.10   # у нижнего (напольного) яруса — на отбойнике/стойке
 
     def __post_init__(self) -> None:
         if self.normal_y not in (1, -1):
@@ -51,6 +53,11 @@ class RackRow:
     @property
     def slot_width(self) -> float:
         return self.bay_width / self.slots_per_bay
+
+    def address_z(self, level: int) -> float:
+        """Высота центра адресной этикетки яруса level (с 1). Ориентир для локализации (LOC-08/11)."""
+        lz = self.level_z[level - 1]
+        return lz + self.address_offset if lz > 0 else self.floor_address_z
 
     def address(self, bay: int, level: int, slot: int) -> str:
         return f"{self.id}-{bay:02d}-{level}-{slot}"
@@ -115,6 +122,18 @@ class Warehouse:
 
     def locations(self) -> list[Location]:
         return [loc for r in self.rows for loc in r.locations()]
+
+    def address_label_position(self, address: str) -> tuple[RackRow, float, float] | None:
+        """Где на фасаде висит адресная этикетка ячейки: (ряд, x, z); None — нет такого адреса."""
+        try:
+            row_id, bay, level, slot = address.rsplit("-", 3)
+            row, bay, level, slot = self.row(row_id), int(bay), int(level), int(slot)
+        except (ValueError, KeyError):
+            return None
+        if not (1 <= bay <= row.bays and 1 <= level <= len(row.level_z) and 1 <= slot <= row.slots_per_bay):
+            return None
+        x = row.origin_x + (bay - 1) * row.bay_width + (slot - 0.5) * row.slot_width
+        return row, x, row.address_z(level)
 
     # --- сериализация -------------------------------------------------------
     def to_dict(self) -> dict:
