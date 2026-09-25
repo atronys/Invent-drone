@@ -12,8 +12,10 @@
 """
 from __future__ import annotations
 
+import json
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, replace
+from pathlib import Path
 
 from .camera import Camera
 from .layout import Aisle, Warehouse
@@ -38,6 +40,26 @@ class ScanParams:
     battery_s: float = 600.0         # полётное время на одной АКБ
     reserve: float = 0.25            # резерв АКБ
     turnaround_s: float = 120.0      # замена/зарядка АКБ между вылетами
+
+    @classmethod
+    def load(cls, path: str | Path) -> "ScanParams":
+        """JSON: {"v_scan": 0.4, ..., "camera": {...} | "camera_file": "left.yaml"} (FLT-02).
+
+        Путь camera_file считается относительно файла параметров. Неизвестные ключи — ошибка
+        (опечатка в имени параметра не должна молча игнорироваться).
+        """
+        path = Path(path)
+        d = json.loads(path.read_text(encoding="utf-8"))
+        known = {f.name for f in fields(cls)} | {"camera_file"}
+        unknown = set(d) - known
+        if unknown:
+            raise ValueError(f"{path}: неизвестные параметры {sorted(unknown)}")
+        cam = Camera()
+        if "camera_file" in d:
+            cam = Camera.load(path.parent / d.pop("camera_file"))
+        elif "camera" in d:
+            cam = Camera(**d.pop("camera"))
+        return replace(cls(camera=cam), **d)
 
 
 @dataclass(frozen=True)
@@ -190,7 +212,17 @@ def _transit(a: Waypoint, b: Waypoint, same_aisle: bool, x_cross: float, p: Scan
     return out
 
 
-def plan(wh: Warehouse, p: ScanParams | None = None) -> Plan:
+def _restrict(ps: Pass, only: set[str]) -> Pass | None:
+    """Оставить в пролёте участок от первой до последней точки, видящей адреса из only."""
+    idx = [i for i, w in enumerate(ps.waypoints) if only.intersection(w.targets)]
+    if not idx:
+        return None
+    wps = [replace(w, targets=tuple(t for t in w.targets if t in only)) for w in ps.waypoints[min(idx):max(idx) + 1]]
+    return Pass(ps.aisle, ps.z, wps)
+
+
+def plan(wh: Warehouse, p: ScanParams | None = None, only: set[str] | None = None) -> Plan:
+    """План облёта всего склада или, если задан only, — перескана этих адресов (MIS-03)."""
     p = p or ScanParams()
     budget = p.battery_s * (1 - p.reserve) - p.sortie_overhead_s - 2 * p.transit_z / p.v_z
     dock = Waypoint(wh.dock[0], wh.dock[1], p.transit_z, 0.0)
@@ -200,6 +232,11 @@ def plan(wh: Warehouse, p: ScanParams | None = None) -> Plan:
         ps, direction, w = _aisle_passes(wh, aisle, p, direction)
         passes += ps
         warnings += w
+    if only is not None:
+        unknown = only - {loc.address for loc in wh.locations()}
+        if unknown:
+            raise PlanningError(f"неизвестные адреса: {sorted(unknown)[:5]}")
+        passes = [r for r in (_restrict(ps, only) for ps in passes) if r]
 
     def finish(route: list[Waypoint]) -> Sortie:
         full = route + _transit(route[-1], dock, False, wh.cross_aisle_x, p)
@@ -226,7 +263,7 @@ def plan(wh: Warehouse, p: ScanParams | None = None) -> Plan:
         sorties.append(finish(route))
 
     result = Plan(sorties, warnings, p.turnaround_s)
-    missing = {loc.address for loc in wh.locations()} - result.covered
+    missing = (only if only is not None else {loc.address for loc in wh.locations()}) - result.covered
     if missing:
         warnings.append(f"не покрыто ячеек: {len(missing)} (например, {sorted(missing)[:5]})")
     return result

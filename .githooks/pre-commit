@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# ENV-06: тесты перед каждым коммитом. Разово пропустить: git commit --no-verify
+set -e
+ROOT="$(git rev-parse --show-toplevel)"
+PY=""
+for c in python3 python; do   # на Windows python3 бывает заглушкой Microsoft Store — проверяем, что работает
+  if "$c" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then PY="$c"; break; fi
+done
+[ -n "$PY" ] || { echo "pre-commit: не найден Python >= 3.10"; exit 1; }
+(cd "$ROOT/core" && "$PY" -m unittest discover -s tests -q) || { echo "pre-commit: тесты core упали — коммит отменён"; exit 1; }
+for d in sim/tests tools/tests research/tests; do
+  if [ -d "$ROOT/$d" ]; then
+    (cd "$ROOT" && "$PY" -m unittest discover -s "$d" -t . -q) || { echo "pre-commit: тесты $d упали — коммит отменён"; exit 1; }
+  fi
+done

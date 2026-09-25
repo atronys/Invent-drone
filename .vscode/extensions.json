@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "charliermarsh.ruff",
+    "ms-vscode.cpptools",
+    "ms-vscode-remote.remote-wsl",
+    "redhat.vscode-yaml"
+  ]
+}

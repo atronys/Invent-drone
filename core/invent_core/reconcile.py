@@ -2,6 +2,8 @@
 
 Ожидаемое состояние выгружается из WMS/1С в CSV (адрес;код). Пустой код — ячейка
 должна быть пустой. Наблюдения дрона — (адрес, код|None, занято?, уверенность).
+Занятость может быть неизвестна (None): пока нет датчика занятости (PER-08), ячейку без
+прочитанной этикетки нельзя честно назвать пустой — такие случаи идут в UNREADABLE/примечание.
 """
 from __future__ import annotations
 
@@ -25,7 +27,7 @@ class Status(str, Enum):
 class Observation:
     address: str
     code: str | None
-    occupied: bool = True
+    occupied: bool | None = True   # None — занятость не определялась
     confidence: float = 1.0
 
 
@@ -55,8 +57,8 @@ class Report:
         return {s.value: self.count(s) for s in Status}
 
 
-def aggregate(observations: list[Observation]) -> dict[str, tuple[bool, str | None, str]]:
-    """Несколько наблюдений на ячейку -> (занято, лучший код, примечание о конфликте)."""
+def aggregate(observations: list[Observation]) -> dict[str, tuple[bool | None, str | None, str]]:
+    """Несколько наблюдений на ячейку -> (занято|None, лучший код, примечание о конфликте)."""
     by_addr: dict[str, list[Observation]] = defaultdict(list)
     for o in observations:
         by_addr[o.address].append(o)
@@ -68,7 +70,13 @@ def aggregate(observations: list[Observation]) -> dict[str, tuple[bool, str | No
                 votes[o.code] += o.confidence
         code = max(votes, key=votes.get) if votes else None
         note = f"конфликт чтений: {sorted(votes)}" if len(votes) > 1 else ""
-        out[addr] = (bool(votes) or any(o.occupied for o in obs), code, note)
+        if votes or any(o.occupied for o in obs):
+            occupied = True
+        elif all(o.occupied is None for o in obs):
+            occupied = None
+        else:
+            occupied = False
+        out[addr] = (occupied, code, note)
     return out
 
 
@@ -89,9 +97,11 @@ def reconcile(expected: dict[str, str | None], observations: list[Observation]) 
             notes.append(f"по WMS паллета числится в {home[found]}")
         if exp and not found and not occupied and exp in where:
             notes.append(f"паллета найдена в {where[exp]}")
+        if occupied is None and not found:
+            notes.append("занятость не определялась")
         if exp:
             status = (Status.OK if found == exp else Status.MISMATCH if found
-                      else Status.UNREADABLE if occupied else Status.MISSING)
+                      else Status.MISSING if occupied is False else Status.UNREADABLE)
         else:
             status = Status.UNEXPECTED if occupied else Status.OK
         results.append(LocationResult(addr, status, exp, found, "; ".join(notes)))
@@ -128,17 +138,58 @@ def load_expected_csv(path: str | Path) -> dict[str, str | None]:
     return {_pick(r, "address", "адрес"): (_pick(r, "code", "код", "sscc") or None) for r in _read_rows(path)}
 
 
+def _parse_occupied(value: str | None) -> bool | None:
+    if value is None:
+        return True          # столбца нет — старый формат: наблюдение = паллета видна
+    v = value.strip().lower()
+    if v == "":
+        return None
+    return v not in ("0", "false", "нет", "no")
+
+
 def load_observations_csv(path: str | Path) -> list[Observation]:
-    """CSV наблюдений: address;code;occupied;confidence (occupied: 1/0, по умолчанию 1)."""
+    """CSV наблюдений: address;code;occupied;confidence (occupied: 1/0/пусто = неизвестно)."""
     out = []
     for r in _read_rows(path):
         out.append(Observation(
             address=r["address"],
             code=r.get("code") or None,
-            occupied=r.get("occupied", "1") not in ("0", "false", "нет", ""),
+            occupied=_parse_occupied(r.get("occupied")),
             confidence=float(r.get("confidence") or 1.0),
         ))
     return out
+
+
+def write_observations_csv(observations: list[Observation], path: str | Path) -> None:
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f, delimiter=";")
+        w.writerow(["address", "code", "occupied", "confidence"])
+        for o in observations:
+            occ = "" if o.occupied is None else int(o.occupied)
+            w.writerow([o.address, o.code or "", occ, f"{o.confidence:.3f}"])
+
+
+class SortieRecorder:
+    """Сбор наблюдений за вылет (PER-07): прочитанные этикетки + ячейки, которые были в кадре.
+
+    Ячейка из плана без чтения -> Observation(code=None, occupied=None): без датчика занятости
+    это «не прочитано», а не «пусто».
+    """
+
+    def __init__(self) -> None:
+        self.expected: set[str] = set()
+        self.reads: list[Observation] = []
+
+    def expect(self, addresses) -> None:
+        self.expected.update(a for a in addresses if a)
+
+    def read(self, address: str, code: str, confidence: float = 1.0) -> None:
+        if address and code:
+            self.reads.append(Observation(address, code, True, confidence))
+
+    def observations(self) -> list[Observation]:
+        seen = {o.address for o in self.reads}
+        return self.reads + [Observation(a, None, None, 0.0) for a in sorted(self.expected - seen)]
 
 
 def write_report_csv(report: Report, path: str | Path) -> None:

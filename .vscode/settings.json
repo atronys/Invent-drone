@@ -1,0 +1,7 @@
+{
+  "files.eol": "\n",
+  "python.analysis.extraPaths": ["core"],
+  "python.testing.unittestEnabled": true,
+  "python.testing.unittestArgs": ["-s", "core/tests", "-t", "core"],
+  "[python]": { "editor.rulers": [120] }
+}

@@ -16,5 +16,8 @@ setup(
     maintainer_email="todo@example.com",
     description="Чтение складских этикеток (zxing-cpp) и привязка к ячейкам",
     license="Proprietary",
-    entry_points={"console_scripts": ["label_reader = invent_perception.label_reader_node:main"]},
+    entry_points={"console_scripts": [
+        "label_reader = invent_perception.label_reader_node:main",
+        "scan_recorder = invent_perception.scan_recorder_node:main",
+    ]},
 )

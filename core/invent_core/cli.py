@@ -29,12 +29,29 @@ def cmd_make_layout(a) -> None:
     print(f"{a.out}: рядов {len(wh.rows)}, проходов {len(wh.aisles)}, ячеек {len(wh.locations())}")
 
 
+def _read_addresses(path: str) -> set[str]:
+    """Список адресов: CSV со столбцом address/адрес или по одному адресу в строке."""
+    lines = [ln.strip() for ln in open(path, encoding="utf-8-sig") if ln.strip()]
+    head = lines[0].lower().replace(",", ";").split(";")
+    col = next((i for i, h in enumerate(head) if h in ("address", "адрес")), None)
+    if col is None:
+        return set(lines)
+    return {ln.replace(",", ";").split(";")[col] for ln in lines[1:]}
+
+
 def cmd_plan(a) -> None:
     wh = Warehouse.load(a.layout)
-    p = replace(ScanParams(camera=_camera(a)), battery_s=a.battery, hold_s=a.hold, v_scan=a.v_scan)
-    pl = plan(wh, p)
+    if a.params:
+        p = ScanParams.load(a.params)
+    else:
+        p = replace(ScanParams(camera=_camera(a)), battery_s=a.battery, hold_s=a.hold, v_scan=a.v_scan)
+    only = _read_addresses(a.only) if a.only else None
+    if only is not None and not a.params:
+        p = replace(p, hold_s=a.hold or 1.5)  # перескан — режим stop-and-scan
+    pl = plan(wh, p, only)
     n_wp = sum(len(s.waypoints) for s in pl.sorties)
-    print(f"Склад «{wh.name}»: ячеек {len(wh.locations())}, покрыто {len(pl.covered)}")
+    scope = f"перескан {len(only)} адресов" if only is not None else f"ячеек {len(wh.locations())}"
+    print(f"Склад «{wh.name}»: {scope}, покрыто {len(pl.covered)}")
     print(f"Вылетов: {len(pl.sorties)}, точек маршрута: {n_wp}")
     for i, s in enumerate(pl.sorties):
         print(f"  вылет {i}: {s.duration_s / 60:5.1f} мин, ячеек {len(s.targets)}")
@@ -98,6 +115,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--hold", type=float, default=0.0, help="зависание на точке, с (0 — непрерывная съёмка)")
     p.add_argument("--v-scan", type=float, default=0.4)
     p.add_argument("--export", help="сохранить маршрут (JSON) для узла миссии")
+    p.add_argument("--params", help="JSON с ScanParams (FLT-02); перекрывает флаги камеры/АКБ/скорости")
+    p.add_argument("--only", help="перескан: файл со списком адресов (MIS-03)")
     cam_args(p)
     p.set_defaults(func=cmd_plan)
 

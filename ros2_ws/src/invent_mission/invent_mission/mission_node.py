@@ -22,6 +22,7 @@ from px4_msgs.msg import (OffboardControlMode, TrajectorySetpoint, VehicleComman
                           VehicleLocalPosition, VehicleStatus)
 
 from invent_core.coverage import ScanParams, plan
+from invent_core.frames import enu_to_ned, map_to_px4, px4_to_map, wrap, yaw_enu_to_ned, yaw_ned_to_enu
 from invent_core.layout import Warehouse
 
 
@@ -34,18 +35,11 @@ class State(Enum):
     ABORT = "ABORT"
 
 
-def enu_to_ned(x, y, z):
-    return y, x, -z   # преобразование симметрично: оно же NED -> ENU
-
-
-def wrap(a):
-    return math.atan2(math.sin(a), math.cos(a))
-
-
 class MissionNode(Node):
     def __init__(self):
         super().__init__("invent_mission")
         self.declare_parameter("layout", "")
+        self.declare_parameter("scan_params", "")   # JSON ScanParams (FLT-02); пусто — значения по умолчанию
         self.declare_parameter("sortie", 0)
         self.declare_parameter("rate_hz", 20.0)
         self.declare_parameter("acceptance_radius", 0.15)
@@ -54,7 +48,8 @@ class MissionNode(Node):
         self.declare_parameter("local_position_topic", "/fmu/out/vehicle_local_position")
 
         wh = Warehouse.load(self.get_parameter("layout").value)
-        self.p = ScanParams()
+        params_file = self.get_parameter("scan_params").value
+        self.p = ScanParams.load(params_file) if params_file else ScanParams()
         pl = plan(wh, self.p)
         for w in pl.warnings:
             self.get_logger().warn(w)
@@ -91,9 +86,8 @@ class MissionNode(Node):
     # --- входы ------------------------------------------------------------
     def on_position(self, msg: VehicleLocalPosition):
         if msg.xy_valid and msg.z_valid:
-            e, n, u = enu_to_ned(msg.x, msg.y, msg.z)
-            self.pos = (e + self.dock[0], n + self.dock[1], u + self.dock[2])
-            self.yaw = wrap(math.pi / 2 - msg.heading)  # NED -> ENU
+            self.pos = px4_to_map((msg.x, msg.y, msg.z), self.dock)
+            self.yaw = yaw_ned_to_enu(msg.heading)
 
     def on_status(self, msg: VehicleStatus):
         self.status = msg
@@ -114,10 +108,10 @@ class MissionNode(Node):
     def setpoint(self, xyz, yaw_enu, vel=(0.0, 0.0, 0.0)):
         m = TrajectorySetpoint()
         m.timestamp = self.now_us()
-        m.position = [float(v) for v in enu_to_ned(*(xyz[k] - self.dock[k] for k in range(3)))]
-        m.velocity = [float(v) for v in enu_to_ned(*vel)]          # feed-forward вдоль отрезка
+        m.position = [float(v) for v in map_to_px4(xyz, self.dock)]
+        m.velocity = [float(v) for v in enu_to_ned(vel)]           # feed-forward вдоль отрезка
         m.acceleration = [math.nan] * 3
-        m.yaw = float(wrap(math.pi / 2 - yaw_enu))                  # ENU -> NED
+        m.yaw = float(yaw_enu_to_ned(yaw_enu))
         self.pub_sp.publish(m)
 
     def publish_status(self):

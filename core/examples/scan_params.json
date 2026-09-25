@@ -1,0 +1,15 @@
+{
+  "camera": {"width": 4056, "height": 3040, "hfov_deg": 50.0, "vfov_deg": 39.0},
+  "view_margin": 0.2,
+  "min_z": 0.8,
+  "transit_z": 2.0,
+  "v_transit": 1.0,
+  "v_scan": 0.4,
+  "v_z": 0.5,
+  "yaw_rate_deg": 30.0,
+  "hold_s": 0.0,
+  "sortie_overhead_s": 20.0,
+  "battery_s": 600.0,
+  "reserve": 0.25,
+  "turnaround_s": 120.0
+}
