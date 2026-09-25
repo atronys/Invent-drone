@@ -67,14 +67,17 @@ def one(cfg, base: str):
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--only", help="буквы конфигураций, например BC (результаты — в results_<буквы>.*)")
     a = ap.parse_args()
+    configs = [c for c in CONFIGS if not a.only or c[0][0] in a.only]
+    suffix = f"_{a.only}" if a.only else ""
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     with tempfile.TemporaryDirectory() as base:
-        for module in sorted({c[1] for c in CONFIGS}):   # текстуры один раз, до параллельного прогона
+        for module in sorted({c[1] for c in configs}):   # текстуры один раз, до параллельного прогона
             world(module, Path(base))
         with ProcessPoolExecutor(a.workers) as ex:
-            rows = list(ex.map(one, CONFIGS, [base] * len(CONFIGS)))
+            rows = list(ex.map(one, configs, [base] * len(configs)))
     lines = ["| Конфигурация | Кадров | Read rate паллет | Привязка паллет | Адресных прочитано | Адресные на своём месте | Невязка адресных, см | Ошибок WMS найдено |",
              "|---|---|---|---|---|---|---|---|"]
     for r in rows:

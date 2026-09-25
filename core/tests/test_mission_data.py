@@ -68,6 +68,14 @@ class TestRecorderAndOccupancy(unittest.TestCase):
         self.assertEqual(st["A2"][0], Status.OK)
         self.assertIn("не определялась", st["A2"][1])
 
+    def test_seen_elsewhere_is_missing_without_occupancy(self):
+        """Ожидаемую паллету прочитали в другой ячейке -> здесь MISSING, даже без датчика занятости."""
+        rep = reconcile({"A1": "S1", "B1": None}, [Observation("A1", None, None), Observation("B1", "S1")])
+        st = {r.address: r for r in rep.results}
+        self.assertEqual(st["A1"].status, Status.MISSING)
+        self.assertIn("B1", st["A1"].note)
+        self.assertEqual(st["B1"].status, Status.UNEXPECTED)
+
     def test_csv_roundtrip(self):
         obs = [Observation("A1", "S1", True, 0.9), Observation("A2", None, None, 0.0), Observation("A3", None, False)]
         with tempfile.TemporaryDirectory() as d:

@@ -100,8 +100,11 @@ def reconcile(expected: dict[str, str | None], observations: list[Observation]) 
         if occupied is None and not found:
             notes.append("занятость не определялась")
         if exp:
+            # Паллету видели в другой ячейке -> здесь её точно нет (одна паллета не бывает в двух местах),
+            # даже если занятость этой ячейки не определялась.
+            elsewhere = exp in where and where[exp] != addr
             status = (Status.OK if found == exp else Status.MISMATCH if found
-                      else Status.MISSING if occupied is False else Status.UNREADABLE)
+                      else Status.MISSING if occupied is False or elsewhere else Status.UNREADABLE)
         else:
             status = Status.UNEXPECTED if occupied else Status.OK
         results.append(LocationResult(addr, status, exp, found, "; ".join(notes)))
