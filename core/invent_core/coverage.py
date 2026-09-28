@@ -156,7 +156,8 @@ def _aisle_passes(wh: Warehouse, aisle: Aisle, p: ScanParams, direction: int):
     fp_w, fp_h = p.camera.footprint(dist)
     band, step = fp_h * (1 - p.view_margin), fp_w * (1 - p.view_margin)
     locs = [loc for r in rows for loc in r.locations()]
-    addr_zs = sorted({r.address_z(lv) for r in rows for lv in range(1, len(r.level_z) + 1)})         if p.cover_address_labels else []
+    addr_zs = (sorted({r.address_z(lv) for r in rows for lv in range(1, len(r.level_z) + 1)})
+               if p.cover_address_labels else [])
     x0, x1 = min(r.origin_x for r in rows), max(r.end_x for r in rows)
     n = max(1, math.ceil((x1 - x0) / step))
     spacing = (x1 - x0) / n                             # равномерно, spacing <= step
@@ -172,7 +173,8 @@ def _aisle_passes(wh: Warehouse, aisle: Aisle, p: ScanParams, direction: int):
                 f"проход {aisle.id}: этикетки на высотах {lost} вне полосы обзора при высоте камер {z:.2f} "
                 f"(min_z={p.min_z}); нужен наклон камеры или меньший min_z"
             )
-        if addr_zs and not any(abs(g - z) <= band / 2 + 1e-9 for g in addr_zs) and                 any(abs(loc.z - z) <= band / 2 + 1e-9 for loc in locs):
+        if (addr_zs and not any(abs(g - z) <= band / 2 + 1e-9 for g in addr_zs)
+                and any(abs(loc.z - z) <= band / 2 + 1e-9 for loc in locs)):
             warnings.append(f"проход {aisle.id}, z={z:.2f}: адресные этикетки не в кадре — нет ориентиров "
                             f"(нужно больше пикселей по вертикали, см. barcode.required_vertical_px)")
         yaw = 0.0 if direction > 0 else math.pi
@@ -228,23 +230,97 @@ def _restrict(ps: Pass, only: set[str]) -> Pass | None:
     return Pass(ps.aisle, ps.z, wps)
 
 
-def plan(wh: Warehouse, p: ScanParams | None = None, only: set[str] | None = None) -> Plan:
-    """План облёта всего склада или, если задан only, — перескана этих адресов (MIS-03)."""
+def _orient(ps: Pass, direction: int) -> Pass:
+    """Пролёт в нужную сторону: +1 — вдоль +x, -1 — вдоль -x (курс по ходу)."""
+    w = ps.waypoints
+    cur = 1 if w[-1].x >= w[0].x else -1
+    if len(w) < 2 or cur == direction:
+        return ps
+    yaw = 0.0 if direction > 0 else math.pi
+    return Pass(ps.aisle, ps.z, [replace(x, yaw=yaw) for x in reversed(w)])
+
+
+def _arrange(by_aisle: list[list[Pass]], order: list[int], starts: list[int], desc: list[bool]) -> list[Pass]:
+    """Последовательность пролётов: порядок проходов, направление первого пролёта, ярусы снизу/сверху; «змейка»."""
+    out = []
+    for i in order:
+        ps = list(reversed(by_aisle[i])) if desc[i] else by_aisle[i]
+        out += [_orient(q, starts[i] * (1 if k % 2 == 0 else -1)) for k, q in enumerate(ps)]
+    return out
+
+
+def plan(wh: Warehouse, p: ScanParams | None = None, only: set[str] | None = None, optimize: bool = True) -> Plan:
+    """План облёта всего склада или, если задан only, — перескана этих адресов (MIS-03).
+
+    optimize (MIS-07): покоординатный перебор порядка проходов, направления входа и порядка ярусов
+    с той же жадной упаковкой в вылеты; базовая «змейка» входит в перебор, поэтому результат не хуже.
+    Критерий — (число вылетов, полётное время). Сравнение с точным решением: research/sortie_planning.
+    """
     p = p or ScanParams()
     budget = p.battery_s * (1 - p.reserve) - p.sortie_overhead_s - 2 * p.transit_z / p.v_z
     dock = Waypoint(wh.dock[0], wh.dock[1], p.transit_z, 0.0)
 
-    passes, warnings, direction = [], [], 1
-    for aisle in sorted(wh.aisles, key=lambda a: a.y):
-        ps, direction, w = _aisle_passes(wh, aisle, p, direction)
-        passes += ps
+    aisles = sorted(wh.aisles, key=lambda a: a.y)
+    by_aisle, warnings = [], []
+    for aisle in aisles:
+        ps, _, w = _aisle_passes(wh, aisle, p, 1)
+        by_aisle.append(ps)
         warnings += w
     if only is not None:
         unknown = only - {loc.address for loc in wh.locations()}
         if unknown:
             raise PlanningError(f"неизвестные адреса: {sorted(unknown)[:5]}")
-        passes = [r for r in (_restrict(ps, only) for ps in passes) if r]
+        by_aisle = [[r for r in (_restrict(ps, only) for ps in group) if r] for group in by_aisle]
 
+    # базовая «змейка»: направление продолжается из прохода в проход
+    n = len(by_aisle)
+    starts, d = [], 1
+    for group in by_aisle:
+        starts.append(d)
+        d = d if len(group) % 2 == 0 else -d
+    config = (list(range(n)), starts, [False] * n)
+    passes = _arrange(by_aisle, *config)
+    if optimize and passes:
+        passes = _best_arrangement(by_aisle, config, lambda ps: _pack(wh, p, ps, budget, dock))
+    sorties = _pack(wh, p, passes, budget, dock)
+    result = Plan(sorties, warnings, p.turnaround_s)
+    missing = (only if only is not None else {loc.address for loc in wh.locations()}) - result.covered
+    if missing:
+        warnings.append(f"не покрыто ячеек: {len(missing)} (например, {sorted(missing)[:5]})")
+    return result
+
+
+def _best_arrangement(by_aisle, config, pack) -> list[Pass]:
+    def cost(cfg):
+        try:
+            s = pack(_arrange(by_aisle, *cfg))
+        except PlanningError:
+            return (math.inf, math.inf)
+        return (len(s), sum(x.duration_s for x in s))
+
+    order, starts, desc = config
+    best_cfg, best = config, cost(config)
+    for ord_ in (order, list(reversed(order))):
+        cur = (list(ord_), list(starts), list(desc))
+        cur_cost = cost(cur)
+        for _ in range(3):                       # покоординатный спуск по проходам
+            improved = False
+            for i in range(len(by_aisle)):
+                for s_ in (1, -1):
+                    for d_ in (False, True):
+                        cand = (cur[0], cur[1][:i] + [s_] + cur[1][i + 1:], cur[2][:i] + [d_] + cur[2][i + 1:])
+                        c = cost(cand)
+                        if c < cur_cost:
+                            cur, cur_cost, improved = cand, c, True
+            if not improved:
+                break
+        if cur_cost < best:
+            best_cfg, best = cur, cur_cost
+    return _arrange(by_aisle, *best_cfg)
+
+
+def _pack(wh: Warehouse, p: ScanParams, passes: list[Pass], budget: float, dock: Waypoint) -> list[Sortie]:
+    """Жадная упаковка последовательности пролётов в вылеты с возвратом к доку."""
     def finish(route: list[Waypoint]) -> Sortie:
         full = route + _transit(route[-1], dock, False, wh.cross_aisle_x, p)
         return Sortie(full, p.sortie_overhead_s + 2 * p.transit_z / p.v_z + route_time(full, p))
@@ -268,9 +344,4 @@ def plan(wh: Warehouse, p: ScanParams | None = None, only: set[str] | None = Non
             route, t, cur_aisle = [dock], 0.0, None
     if len(route) > 1:
         sorties.append(finish(route))
-
-    result = Plan(sorties, warnings, p.turnaround_s)
-    missing = (only if only is not None else {loc.address for loc in wh.locations()}) - result.covered
-    if missing:
-        warnings.append(f"не покрыто ячеек: {len(missing)} (например, {sorted(missing)[:5]})")
-    return result
+    return sorties
