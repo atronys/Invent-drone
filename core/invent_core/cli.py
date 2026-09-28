@@ -5,6 +5,7 @@
   optics       проверка оптики: читается ли этикетка на дистанции и скорости
   reconcile    сверка наблюдений с выгрузкой WMS/1С -> CSV-отчёт
   label-pose   дистанция до этикетки по фото (PnP), упражнение LEARN-07
+  economics    юнит-экономика: ручная инвентаризация против дрона (BIZ-05)
 """
 from __future__ import annotations
 
@@ -123,6 +124,23 @@ def cmd_label_pose(a) -> None:
         print(f"разметка: {a.out}")
 
 
+def cmd_economics(a) -> None:
+    """BIZ-05: юнит-экономика; производительность дрона — из планировщика по раскладке (если задана)."""
+    from dataclasses import fields as dc_fields
+
+    from . import economics as ec
+    kw = {f.name: getattr(a, f.name) for f in dc_fields(ec.Inputs) if getattr(a, f.name, None) is not None}
+    if a.layout:
+        p = ScanParams.load(a.params) if a.params else ScanParams()
+        pl = plan(Warehouse.load(a.layout), p)
+        kw["drone_cells_per_hour"] = pl.locations_per_hour
+        print(f"производительность из планировщика: {pl.locations_per_hour:.0f} ячеек/ч "
+              f"(вылетов {len(pl.sorties)}, с заменой АКБ {p.turnaround_s:.0f} с)")
+    i = ec.Inputs(**kw)
+    print(ec.report(i, ec.evaluate(i)))
+    print(f"Точка безубыточности: {ec.breakeven_counts(i):.1f} пересчётов в год")
+
+
 def cmd_reconcile(a) -> None:
     report = reconcile(load_expected_csv(a.expected), load_observations_csv(a.observations))
     write_report_csv(report, a.out)
@@ -175,6 +193,16 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--size", type=float, nargs=2, default=(0.148, 0.105), help="ширина и высота этикетки, м")
     p.add_argument("--out", help="сохранить снимок с разметкой")
     p.set_defaults(func=cmd_label_pose)
+
+    from . import economics as ec
+    from dataclasses import fields as dc_fields
+    p = sub.add_parser("economics", help="юнит-экономика: вручную против дрона (BIZ-05)")
+    p.add_argument("--layout", help="раскладка склада: производительность дрона посчитает планировщик")
+    p.add_argument("--params", help="JSON ScanParams для планировщика")
+    for f in dc_fields(ec.Inputs):
+        p.add_argument("--" + f.name.replace("_", "-"), dest=f.name, type=type(f.default), default=None,
+                       help=f"по умолчанию {f.default}")
+    p.set_defaults(func=cmd_economics)
 
     p = sub.add_parser("reconcile")
     p.add_argument("expected", help="CSV из WMS/1С: адрес;код")
