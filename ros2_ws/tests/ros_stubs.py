@@ -14,6 +14,8 @@ import sys
 import types
 from collections import defaultdict
 
+NAN = float("nan")
+
 
 class Msg:
     """Сообщение: любые поля через kwargs, отсутствующие — по умолчанию из FIELDS."""
@@ -53,9 +55,12 @@ PARAMS: dict[str, dict] = defaultdict(dict)   # имя узла -> {параме
 NODES: list = []
 
 
+TF: dict[str, object] = {}                    # дочерний кадр -> последний TransformStamped (родитель в header)
+
+
 def reset():
     CLOCK.t_ns = 0
-    for d in (BUS, SENT, PARAMS):
+    for d in (BUS, SENT, PARAMS, TF):
         d.clear()
     NODES.clear()
 
@@ -81,15 +86,15 @@ class _Logger:
     def _log(self, level, text):
         self.lines.append((level, text))
 
-    def info(self, t):
+    def info(self, t, **_):
         self._log("INFO", t)
 
-    def warn(self, t):
+    def warn(self, t, **_):      # throttle_duration_sec и т. п. — как в rclpy
         self._log("WARN", t)
 
     warning = warn
 
-    def error(self, t):
+    def error(self, t, **_):
         self._log("ERROR", t)
 
     def text(self) -> str:
@@ -149,6 +154,53 @@ def spin_for(seconds: float, dt: float = 0.05, hook=None):
                     tm[1]()
 
 
+# --- tf2 ---------------------------------------------------------------------------------
+
+class TransformException(Exception):
+    pass
+
+
+class _Broadcaster:
+    def __init__(self, _node=None):
+        pass
+
+    def sendTransform(self, tfs):  # noqa: N802 — имя как в tf2_ros
+        for t in tfs if isinstance(tfs, (list, tuple)) else [tfs]:
+            TF[t.child_frame_id] = t
+
+
+class _Buffer:
+    """lookup_transform(target, source) = T_target_source: цепочка от source вверх по родителям до target."""
+
+    def __init__(self, *_, **__):
+        pass
+
+    def lookup_transform(self, target, source, _time=None, timeout=None):
+        from invent_core.frames import matmul, matrix_from_quat, quat_from_matrix
+        r = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+        t = (0.0, 0.0, 0.0)
+        frame = source
+        while frame != target:
+            if frame not in TF:
+                raise TransformException(f"нет цепочки {target} <- {source} (оборвалась на {frame})")
+            tr = TF[frame].transform
+            q, p = tr.rotation, tr.translation
+            rp = matrix_from_quat(q.w, q.x, q.y, q.z)
+            t = tuple(sum(rp[i][j] * t[j] for j in range(3)) + (p.x, p.y, p.z)[i] for i in range(3))
+            r = matmul(rp, r)
+            frame = TF[frame].header.frame_id
+        out = _GEO["TransformStamped"]()
+        out.header.frame_id, out.child_frame_id = target, source
+        out.transform.translation.x, out.transform.translation.y, out.transform.translation.z = t
+        w, x, y, z = quat_from_matrix(r)
+        out.transform.rotation.w, out.transform.rotation.x = w, x
+        out.transform.rotation.y, out.transform.rotation.z = y, z
+        return out
+
+
+_GEO: dict = {}
+
+
 # --- модули ------------------------------------------------------------------------------
 
 def _modules() -> dict[str, types.ModuleType]:
@@ -185,21 +237,78 @@ def _modules() -> dict[str, types.ModuleType]:
               VehicleStatus=_msg("VehicleStatus", {"timestamp": 0, "arming_state": 1, "nav_state": 0},
                                  ARMING_STATE_DISARMED=1, ARMING_STATE_ARMED=2, NAVIGATION_STATE_POSCTL=2,
                                  NAVIGATION_STATE_AUTO_LAND=18, NAVIGATION_STATE_OFFBOARD=14),
-              VehicleOdometry=_msg("VehicleOdometry", {}))
+              # PX4 v1.17 msg/versioned/VehicleOdometry.msg (MESSAGE_VERSION = 0)
+              VehicleOdometry=_msg("VehicleOdometry", {
+                  "timestamp": 0, "timestamp_sample": 0, "pose_frame": 0, "position": lambda: [NAN] * 3,
+                  "q": lambda: [NAN] * 4, "velocity_frame": 0, "velocity": lambda: [NAN] * 3,
+                  "angular_velocity": lambda: [NAN] * 3, "position_variance": lambda: [NAN] * 3,
+                  "orientation_variance": lambda: [NAN] * 3, "velocity_variance": lambda: [NAN] * 3,
+                  "reset_counter": 0, "quality": 0},
+                  POSE_FRAME_UNKNOWN=0, POSE_FRAME_NED=1, POSE_FRAME_FRD=2, VELOCITY_FRAME_UNKNOWN=0,
+                  VELOCITY_FRAME_NED=1, VELOCITY_FRAME_FRD=2, VELOCITY_FRAME_BODY_FRD=3))
+    vec = _msg("Vector3", {"x": 0.0, "y": 0.0, "z": 0.0})
+    quat = _msg("Quaternion", {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0})
+    transform = _msg("Transform", {"translation": vec, "rotation": quat})
+    point = _msg("Point", {"x": 0.0, "y": 0.0, "z": 0.0})
+    pose = _msg("Pose", {"position": point, "orientation": quat})
+    _GEO.update(TransformStamped=_msg("TransformStamped", {"header": Header, "child_frame_id": "",
+                                                           "transform": transform}))
+    geo = mod("geometry_msgs.msg", Vector3=vec, Quaternion=quat, Transform=transform, Point=point, Pose=pose,
+              TransformStamped=_GEO["TransformStamped"],
+              PoseWithCovariance=_msg("PoseWithCovariance", {"pose": pose, "covariance": lambda: [0.0] * 36}),
+              Twist=_msg("Twist", {"linear": vec, "angular": vec}))
+    geo.TwistWithCovariance = _msg("TwistWithCovariance", {"twist": geo.Twist, "covariance": lambda: [0.0] * 36})
+    nav = mod("nav_msgs.msg", Odometry=_msg("Odometry", {"header": Header, "child_frame_id": "",
+                                                         "pose": geo.PoseWithCovariance,
+                                                         "twist": geo.TwistWithCovariance}))
+    tf2_msgs = mod("tf2_msgs.msg", TFMessage=_msg("TFMessage", {"transforms": list}))
+    # Image: пиксели лежат в .array (numpy) — заглушка cv_bridge отдаёт их как есть
+    image = _msg("Image", {"header": Header, "height": 0, "width": 0, "encoding": "", "is_bigendian": 0,
+                           "step": 0, "data": b"", "array": None})
+
+    class CvBridge:
+        def imgmsg_to_cv2(self, msg, desired_encoding="passthrough"):
+            return msg.array
+
+        def cv2_to_imgmsg(self, arr, encoding="passthrough"):
+            return image(height=arr.shape[0], width=arr.shape[1], encoding=encoding, array=arr)
+
+    class Duration:
+        def __init__(self, seconds=0.0, nanoseconds=0):
+            self.nanoseconds = int(seconds * 1e9) + nanoseconds
+
+    class Time:
+        def __init__(self, seconds=0.0, nanoseconds=0):
+            self.nanoseconds = int(seconds * 1e9) + nanoseconds
+
+        @classmethod
+        def from_msg(cls, stamp):
+            return cls(nanoseconds=(stamp.sec * 10**9 + stamp.nanosec) if stamp is not None else 0)
+
+    rclpy.duration = mod("rclpy.duration", Duration=Duration)
+    rclpy.time = mod("rclpy.time", Time=Time)
+    tf2_ros = mod("tf2_ros", Buffer=_Buffer, TransformListener=lambda buf, node=None, **kw: None,
+                  TransformBroadcaster=_Broadcaster, StaticTransformBroadcaster=_Broadcaster,
+                  TransformException=TransformException)
     inv = mod("invent_msgs.msg",
               MissionStatus=_msg("MissionStatus", {"header": Header, "state": "", "sortie": 0, "waypoint_index": 0,
                                                     "waypoint_count": 0, "targets": list}),
               LabelRead=_msg("LabelRead", {"header": Header, "text": "", "symbology": "", "corners": list,
                                             "sscc": "", "address": "", "confidence": 0.0}))
-    std = mod("std_msgs.msg", String=_msg("String", {"data": ""}))
+    std = mod("std_msgs.msg", String=_msg("String", {"data": ""}), Float32=_msg("Float32", {"data": 0.0}),
+              Header=Header)
     trigger = type("Trigger", (), {"Request": _msg("TriggerRequest", {}),
                                    "Response": _msg("TriggerResponse", {"success": False, "message": ""})})
     srvs = mod("std_srvs.srv", Trigger=trigger)
-    return {"rclpy": rclpy, "rclpy.node": rclpy.node, "rclpy.qos": qos,
-            "px4_msgs": mod("px4_msgs", msg=px4), "px4_msgs.msg": px4,
-            "invent_msgs": mod("invent_msgs", msg=inv), "invent_msgs.msg": inv,
-            "std_msgs": mod("std_msgs", msg=std), "std_msgs.msg": std,
-            "std_srvs": mod("std_srvs", srv=srvs), "std_srvs.srv": srvs}
+    sensor = mod("sensor_msgs.msg", Image=image)
+    out = {"rclpy": rclpy, "rclpy.node": rclpy.node, "rclpy.qos": qos, "rclpy.duration": rclpy.duration,
+           "rclpy.time": rclpy.time, "tf2_ros": tf2_ros, "cv_bridge": mod("cv_bridge", CvBridge=CvBridge)}
+    for pkg, sub, m in (("px4_msgs", "msg", px4), ("invent_msgs", "msg", inv), ("std_msgs", "msg", std),
+                        ("std_srvs", "srv", srvs), ("geometry_msgs", "msg", geo), ("nav_msgs", "msg", nav),
+                        ("tf2_msgs", "msg", tf2_msgs), ("sensor_msgs", "msg", sensor)):
+        out[pkg] = mod(pkg, **{sub: m})
+        out[f"{pkg}.{sub}"] = m
+    return out
 
 
 @contextlib.contextmanager
