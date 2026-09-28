@@ -59,6 +59,19 @@ cd .. && python research/landmark_ekf/ekf_sim.py --seeds 10 --plot   # эксп�
 
 Симуляция и ROS 2 — на Ubuntu 24.04: `bash scripts/setup_ubuntu.sh`, затем [sim/README.md](sim/README.md).
 
+### WSL (Windows)
+
+```bash
+# в Ubuntu-24.04 (wsl -d Ubuntu-24.04): проект — в файловой системе Linux, не на /mnt/c
+git clone /mnt/c/INVENT_DRONE ~/INVENT_DRONE && cd ~/INVENT_DRONE
+MIRRORS=on bash scripts/setup_ubuntu.sh      # 1–2 ч; зеркала, если официальные репозитории недоступны
+bash scripts/smoke_sitl.sh                   # дымовой тест: PX4 SITL + склад + наши узлы -> sim/runs/<время>/
+```
+
+Изменения, сделанные на Windows, забирать в WSL командой `git pull`. При VPN на Windows сеть WSL (режим NAT)
+идёт мимо VPN: официальные репозитории ROS, Gazebo и PyPI часто недоступны — поэтому `MIRRORS=on`
+(Ubuntu — Yandex, ROS 2 — USTC, pip — Aliyun, Gazebo — по HTTPS).
+
 ## Принципы
 
 1. **Склад — структурированная среда.** Маршрут строится по плану склада, восприятие нужно для
