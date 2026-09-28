@@ -51,6 +51,21 @@ if ! timeout 180 bash -c "until grep -qiE 'Ready for takeoff|home set' '$OUT/px4
 fi
 log "PX4 готов"
 
+# 2a. SAFE-03: параметры для полётов в помещении (docs/safety_failsafe.md); PX4_PARAMS=none — заводские
+PX4_PARAMS="${PX4_PARAMS:-$ROOT/sim/px4_params_indoor.txt}"
+if [ "$PX4_PARAMS" != none ]; then
+  n_ok=0; n_bad=0
+  while read -r name value _; do
+    case "$name" in ''|\#*) continue ;; esac
+    if ( cd "$PX4_DIR/build/px4_sitl_default" && ./bin/px4-param set "$name" "$value" ) >> "$OUT/px4_params.log" 2>&1; then
+      n_ok=$((n_ok + 1))
+    else
+      n_bad=$((n_bad + 1)); log "ВНИМАНИЕ: не удалось задать $name=$value"
+    fi
+  done < "$PX4_PARAMS"
+  log "параметры PX4 из $(basename "$PX4_PARAMS"): задано $n_ok, ошибок $n_bad"
+fi
+
 # 3. Наши узлы
 ros2 launch invent_bringup sim_mission.launch.py layout:="$OUT/layout.json" scan_params:="$OUT/scan_params.json" \
     model_dir:="$OUT/models/x500_invent" > "$OUT/ros.log" 2>&1 &
