@@ -10,6 +10,13 @@ MPC_XY_CRUISE 1.0
 MPC_Z_VEL_MAX_UP 1.0
 MPC_Z_VEL_MAX_DN 0.7
 MPC_YAWRAUTO_MAX 30
+# Зависимые скорости: больше максимума PX4 урезает их сам, но с critical-сообщением
+# («Cruise speed has been constrained by max speed», MulticopterPositionControl.cpp v1.17) — задаём явно
+MPC_VEL_MANUAL 1.0
+MPC_Z_V_AUTO_UP 1.0
+MPC_Z_V_AUTO_DN 0.7
+MPC_TKO_SPEED 0.7
+MPC_LAND_SPEED 0.5
 
 # Аварийные режимы: только посадка на месте, никакого «возврата» по прямой сквозь стеллажи
 COM_OF_LOSS_T 0.5

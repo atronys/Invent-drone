@@ -105,6 +105,15 @@ if [ ! -d "$SRC/PX4-Autopilot" ]; then
 fi
 # подмодули отдельно и с повторами: так обрыв посреди загрузки не заставляет качать всё заново
 (cd "$SRC/PX4-Autopilot" && retry "${GIT[@]}" submodule update --init --recursive --jobs 4)
+# Обрыв между загрузкой и распаковкой оставляет подмодуль пустым (есть только .git), а git считает его
+# готовым — потом CMake падает («Cannot find source file: heatshrink/heatshrink_decoder.c», 28.09.2026).
+# Восстанавливаем рабочую копию из уже скачанных объектов; не вышло — клонируем подмодуль заново.
+(cd "$SRC/PX4-Autopilot" && git submodule foreach --quiet --recursive '
+  if [ -z "$(ls -A | grep -vx .git)" ]; then
+    echo "подмодуль $displaypath пуст — восстанавливаю"
+    git reset -q --hard || { cd "$toplevel" && git submodule deinit -f "$sm_path" \
+      && rm -rf "$(git rev-parse --git-dir)/modules/$name" && git submodule update --init --recursive "$sm_path"; }
+  fi')
 PX4_SETUP="$SRC/PX4-Autopilot/Tools/setup/ubuntu.sh"
 if $use_mirrors; then
   # скрипт PX4 каждый раз заново пишет репозиторий Gazebo по HTTP (у нас недоступен) — запускаем копию с HTTPS;
