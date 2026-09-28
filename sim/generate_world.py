@@ -87,8 +87,8 @@ def box(name: str, pose, size, rgba="0.2 0.3 0.7 1", collide=True, texture: Path
     p = " ".join(f"{v:.4f}" for v in (*pose, *rpy))
     s = " ".join(f"{v:.4f}" for v in size)
     mat = f"<diffuse>{rgba}</diffuse>"
-    if texture:
-        mat = f"<diffuse>1 1 1 1</diffuse><pbr><metal><albedo_map>{escape(texture.as_posix())}</albedo_map></metal></pbr>"
+    if texture:   # абсолютный путь: мир копируется в каталог PX4 (scripts/smoke_sitl.sh), а текстуры остаются
+        mat = f"<diffuse>1 1 1 1</diffuse><pbr><metal><albedo_map>{escape(texture.resolve().as_posix())}</albedo_map></metal></pbr>"
     col = f'<collision name="{name}_c"><pose>{p}</pose><geometry><box><size>{s}</size></box></geometry></collision>' if collide else ""
     return (f'{col}<visual name="{name}"><pose>{p}</pose><geometry><box><size>{s}</size></box></geometry>'
             f"<material>{mat}</material></visual>\n")
