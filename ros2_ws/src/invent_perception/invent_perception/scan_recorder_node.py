@@ -7,6 +7,7 @@
 Запуск: ros2 run invent_perception scan_recorder --ros-args -p output_dir:=$HOME/invent_runs
 """
 import datetime
+import re
 from pathlib import Path
 
 import rclpy
@@ -20,6 +21,9 @@ class ScanRecorder(Node):
     def __init__(self):
         super().__init__("scan_recorder")
         self.declare_parameter("output_dir", str(Path.home() / "invent_runs"))
+        # адресные этикетки на балках (текст = адрес ячейки) — ориентиры для локализации, не паллеты
+        self.declare_parameter("address_regex", r"^[A-Za-zА-Яа-я]+-\d+-\d+-\d+$")
+        self.address_re = re.compile(self.get_parameter("address_regex").value)
         self.out_dir = Path(self.get_parameter("output_dir").value)
         self.rec = SortieRecorder()
         self.sortie = 0
@@ -28,7 +32,10 @@ class ScanRecorder(Node):
         self.create_subscription(MissionStatus, "mission/status", self.on_status, 10)
 
     def on_label(self, msg: LabelRead):
-        self.rec.read(msg.address, msg.sscc or msg.text, msg.confidence)
+        if not msg.text:               # PER-09: этикетку видели, но не прочитали -> ячейка занята
+            self.rec.seen_unreadable(msg.address)
+        elif msg.sscc or not self.address_re.match(msg.text):
+            self.rec.read(msg.address, msg.sscc or msg.text, msg.confidence)
         self.saved = False
 
     def on_status(self, msg: MissionStatus):

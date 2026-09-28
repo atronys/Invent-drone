@@ -36,6 +36,7 @@ import generate_world as gw  # noqa: E402
 from invent_core import barcode  # noqa: E402
 from invent_core import frames as fr  # noqa: E402
 from invent_core.association import face_point_in_warehouse, locate_in_warehouse, project_to_image  # noqa: E402
+from invent_core.pnp import unread_label_addresses  # noqa: E402
 from invent_core.camera import Camera  # noqa: E402
 from invent_core.coverage import ScanParams, plan  # noqa: E402
 from invent_core.layout import Warehouse  # noqa: E402
@@ -186,7 +187,10 @@ def run_flight(wh: Warehouse, p: ScanParams, truth: dict, wms: dict, labels_dir:
                     cv2.imwrite(str(save_frames / f"frame_{frames:03d}_{look}.jpg"), img)
                 est = (body[0] + rng.normal(0, pose_noise), body[1] + rng.normal(0, pose_noise), body[2])
                 r_e, t_e = fr.camera_pose(est, wp.yaw + math.radians(rng.normal(0, yaw_noise_deg)), look, t_body_cam=mount)
-                for rd in barcode.decode(img):
+                reads = barcode.decode(img)
+                for addr in unread_label_addresses(img, reads, p.camera, r_e, t_e, wh, gw.PALLET_LABEL[0]):
+                    rec.seen_unreadable(addr)
+                for rd in reads:
                     u, v = rd.center
                     addr = locate_in_warehouse(u, v, p.camera, r_e, t_e, wh) or ""
                     if rd.sscc:

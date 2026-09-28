@@ -49,6 +49,24 @@ class TestVirtualFlight(unittest.TestCase):
         self.assertEqual(r.metrics["attribution"], 1.0)
         self.assertEqual(r.metrics["garbage"], 0)
 
+    def test_unreadable_label_means_occupied(self):
+        """PER-09: все этикетки испорчены — не прочитано ничего, но паллета, которой нет в WMS, находится
+        (кандидат этикетки -> «ячейка занята» -> UNEXPECTED), а не ложно считается OK."""
+        import generate_world as gw
+        import virtual_flight as vf
+        from invent_core.layout import make_grid_warehouse
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d)
+            (out / "labels").mkdir()
+            wh = make_grid_warehouse(n_aisles=1, bays=2, levels=2)
+            _, truth, wms, _, _ = gw.build(wh, gw.Options(module_mm=1.0, wms_errors=0.15, damaged=1.0, seed=5), out)
+            unrecorded = [a for a in truth if truth[a] and not wms[a]]
+            self.assertEqual(len(unrecorded), 1)                  # сценарий: 1 паллета не учтена в WMS
+            r = vf.run_flight(wh, self.p, truth, wms, out / "labels")
+        self.assertEqual(r.metrics["reads"], 0)
+        self.assertGreaterEqual(r.reconcile_summary["UNEXPECTED"], 1)
+        self.assertEqual(r.injected_found, r.injected_in_scope)
+
     def test_pose_error_breaks_attribution(self):
         """Ошибка позы 0.5 м (больше половины места 0.9 м) должна портить привязку — тест на чувствительность."""
         import virtual_flight as vf

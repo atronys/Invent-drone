@@ -19,6 +19,7 @@ from sensor_msgs.msg import Image
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from invent_core import barcode
+from invent_core.pnp import unread_label_addresses
 from invent_core.association import locate_in_warehouse
 from invent_core.camera import Camera
 from invent_core.frames import R_LINK_OPTICAL, matmul, matrix_from_quat
@@ -74,9 +75,14 @@ class LabelReader(Node):
             return
         img = self.bridge.imgmsg_to_cv2(msg, desired_encoding="mono8")
         reads = barcode.decode(img)
+        pose = self.camera_pose(msg) if self.wh else None
+        if pose:  # PER-09: этикетка видна, но не прочитана -> пустой text с адресом (scan_recorder: «занято»)
+            for addr in unread_label_addresses(img, reads, self.cam, pose[0], pose[1], self.wh):
+                out = LabelRead(text="", symbology="", sscc="", address=addr, confidence=0.0)
+                out.header = msg.header
+                self.pub.publish(out)
         if not reads:
             return
-        pose = self.camera_pose(msg) if self.wh else None
         for r in reads:
             address = ""
             if pose:

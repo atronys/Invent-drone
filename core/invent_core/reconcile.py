@@ -182,6 +182,7 @@ class SortieRecorder:
     def __init__(self) -> None:
         self.expected: set[str] = set()
         self.reads: list[Observation] = []
+        self.unreadable: set[str] = set()
 
     def expect(self, addresses) -> None:
         self.expected.update(a for a in addresses if a)
@@ -190,9 +191,17 @@ class SortieRecorder:
         if address and code:
             self.reads.append(Observation(address, code, True, confidence))
 
+    def seen_unreadable(self, address: str) -> None:
+        """Этикетку в ячейке видели (детектор кандидатов, PER-09), но не прочитали: ячейка занята."""
+        if address:
+            self.unreadable.add(address)
+
     def observations(self) -> list[Observation]:
         seen = {o.address for o in self.reads}
-        return self.reads + [Observation(a, None, None, 0.0) for a in sorted(self.expected - seen)]
+        out = list(self.reads)
+        for a in sorted((self.expected | self.unreadable) - seen):
+            out.append(Observation(a, None, True if a in self.unreadable else None, 0.0))
+        return out
 
 
 def write_report_csv(report: Report, path: str | Path) -> None:
