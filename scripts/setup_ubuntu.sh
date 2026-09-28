@@ -46,6 +46,9 @@ reachable() { curl -s -o /dev/null -m 10 -f "$1"; }
 CURL=(curl -fsSL --connect-timeout 15 --max-time 300 --retry 8 --retry-delay 5 --retry-all-errors)
 GIT=(git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60)   # обрывать «зависшие» передачи
 retry() { local n=0; until "$@"; do n=$((n + 1)); [ "$n" -ge 6 ] && return 1; echo "повтор $n: $*"; sleep 10; done; }
+# apt/скрипты с загрузками: каждая попытка докачивает то, что не успела прошлая (скачанное остаётся в кэше apt)
+retry_n() { local max=$1 n=0; shift; until "$@"; do n=$((n + 1)); [ "$n" -ge "$max" ] && return 1
+  echo "повтор $n/$max: $*"; sleep 15; done; }
 clone() {   # clone <ветка> <url> <каталог>: неудачную попытку удаляем и повторяем
   local n=0
   until "${GIT[@]}" clone -b "$1" "$2" "$3"; do
@@ -81,8 +84,9 @@ fi
 
 echo "== 1/5 ROS 2 Jazzy"
 if [ ! -f /opt/ros/jazzy/setup.bash ]; then
-  sudo apt update && sudo apt install -y software-properties-common curl git
-  sudo add-apt-repository -y universe
+  retry_n 5 sudo apt update || true
+  retry_n 10 sudo apt install -y software-properties-common curl git
+  retry_n 5 sudo add-apt-repository -y universe || true
   ROS_APT_SOURCE_VERSION=$("${CURL[@]}" https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest \
     | grep -F "tag_name" | awk -F\" '{print $4}') || true
   ROS_APT_SOURCE_VERSION="${ROS_APT_SOURCE_VERSION:-1.3.0}"   # последняя на 28.09.2026 — если API GitHub недоступен
@@ -91,8 +95,8 @@ if [ ! -f /opt/ros/jazzy/setup.bash ]; then
   sudo dpkg -i /tmp/ros2-apt-source.deb
 fi
 $use_mirrors && configure_ros_mirror
-sudo apt update
-sudo apt install -y ros-jazzy-desktop ros-dev-tools ros-jazzy-ros-gz ros-jazzy-cv-bridge python3-pip
+retry_n 5 sudo apt update || true      # недоступный индекс — предупреждение; установка ниже повторяется
+retry_n 15 sudo apt install -y ros-jazzy-desktop ros-dev-tools ros-jazzy-ros-gz ros-jazzy-cv-bridge python3-pip
 
 echo "== 2/5 PX4-Autopilot $PX4_VERSION (SITL + Gazebo Harmonic)"
 mkdir -p "$SRC"
@@ -108,7 +112,7 @@ if $use_mirrors; then
   sed 's#http://packages.osrfoundation.org#https://packages.osrfoundation.org#g' "$PX4_SETUP" > "${PX4_SETUP%.sh}_https.sh"
   PX4_SETUP="${PX4_SETUP%.sh}_https.sh"
 fi
-bash "$PX4_SETUP" --no-nuttx
+retry_n 8 bash "$PX4_SETUP" --no-nuttx
 (cd "$SRC/PX4-Autopilot" && make px4_sitl)
 
 echo "== 3/5 Micro XRCE-DDS Agent $XRCE_AGENT_VERSION"
@@ -132,8 +136,8 @@ if [ ! -d "$PROJECT_DIR/ros2_ws/src/px4_msgs" ]; then
   }
 fi
 # Ubuntu 24.04 запрещает pip в системный Python (PEP 668); пакеты чисто пользовательские, это безопасно.
-sudo apt install -y python3-numpy python3-opencv python3-matplotlib
-pip3 install --user --break-system-packages zxing-cpp python-barcode pillow
+retry_n 10 sudo apt install -y python3-numpy python3-opencv python3-matplotlib
+retry_n 5 pip3 install --user --break-system-packages zxing-cpp python-barcode pillow
 set +u; source /opt/ros/jazzy/setup.bash
 (cd "$PROJECT_DIR/ros2_ws" && colcon build --symlink-install --parallel-workers "$JOBS")
 
