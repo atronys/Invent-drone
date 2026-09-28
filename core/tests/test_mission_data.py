@@ -106,6 +106,26 @@ class TestQuaternionAndWarehouseLookup(unittest.TestCase):
         self.assertIsNone(locate_in_warehouse(960, 540, cam, r, t, wh))
 
 
+class TestReconcileCli(unittest.TestCase):
+    def test_series_files_are_merged(self):
+        """FLT-03: каждый вылет серии — свой CSV; сверка по складу берёт их все."""
+        import contextlib
+        import io
+
+        from invent_core.cli import main
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "wms.csv").write_text("address;code\nA-01-01-1;S1\nA-01-02-1;S2\n", encoding="utf-8")
+            write_observations_csv([Observation("A-01-01-1", "S1", True)], d / "s0.csv")
+            write_observations_csv([Observation("A-01-02-1", "S2", True)], d / "s1.csv")
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                main(["reconcile", str(d / "wms.csv"), str(d / "s0.csv"), str(d / "s1.csv"), "-o", str(d / "r.csv")])
+            self.assertIn("100.0%", out.getvalue())
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                main(["reconcile", str(d / "wms.csv"), str(d / "s0.csv"), "-o", str(d / "r.csv")])
+            self.assertIn("NOT_SCANNED", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
 

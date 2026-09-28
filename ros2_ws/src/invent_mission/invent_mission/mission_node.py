@@ -8,6 +8,10 @@
 сканировании — ограничение смаза этикеток), рыскание — с ограничением yaw_rate
 (резкие развороты срывают VIO, статья A, сценарий 4).
 
+Серия вылетов (FLT-03): -p series:=true — после посадки узел ждёт замены АКБ и команды
+`ros2 service call /mission/continue std_srvs/srv/Trigger`, затем летит следующий вылет плана.
+В SITL замену АКБ изображает пауза: -p continue_after_s:=10.
+
 Запуск: ros2 run invent_mission mission_node --ros-args -p layout:=/path/warehouse.json
 """
 import math
@@ -19,6 +23,7 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 
 from invent_msgs.msg import MissionStatus
 from std_msgs.msg import String
+from std_srvs.srv import Trigger
 from px4_msgs.msg import (OffboardControlMode, TrajectorySetpoint, VehicleCommand,
                           VehicleLocalPosition, VehicleStatus)
 
@@ -44,6 +49,8 @@ class MissionNode(Node):
         self.declare_parameter("sortie", 0)
         self.declare_parameter("rate_hz", 20.0)
         self.declare_parameter("acceptance_radius", 0.15)
+        self.declare_parameter("series", False)          # FLT-03: после посадки — следующий вылет плана
+        self.declare_parameter("continue_after_s", -1.0)  # < 0 — ждать /mission/continue; >= 0 — сам (SITL)
         # PX4 >= 1.16: к топику добавляется суффикс _v<N>, если MESSAGE_VERSION != 0
         # (PX4 v1.17.0, src/modules/uxrce_dds_client/utilities.hpp, generate_topic_name).
         # VehicleStatus и VehicleLocalPosition — версия 1; TrajectorySetpoint, VehicleCommand — 0 (без суффикса).
@@ -57,12 +64,11 @@ class MissionNode(Node):
         pl = plan(wh, self.p)
         for w in pl.warnings:
             self.get_logger().warn(w)
-        self.sortie = self.get_parameter("sortie").value
-        self.wps = pl.sorties[self.sortie].waypoints
+        self.sorties = pl.sorties
+        self.series = self.get_parameter("series").value
+        self.continue_after = self.get_parameter("continue_after_s").value
         self.dock = wh.dock
-        self.get_logger().info(
-            f"вылет {self.sortie + 1}/{len(pl.sorties)}: {len(self.wps)} точек, "
-            f"~{pl.sorties[self.sortie].duration_s / 60:.1f} мин")
+        self.load_sortie(self.get_parameter("sortie").value)
 
         qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                          history=HistoryPolicy.KEEP_LAST, depth=1)
@@ -77,6 +83,7 @@ class MissionNode(Node):
         # SAFE-01/02: GO / SLOW (скорость ×0.5) / STOP (замереть). Нет узла безопасности — считаем GO.
         self.safety = "GO"
         self.create_subscription(String, "safety/state", self.on_safety, 10)
+        self.create_service(Trigger, "mission/continue", self.on_continue)
 
         self.rate = self.get_parameter("rate_hz").value
         self.acc = self.get_parameter("acceptance_radius").value
@@ -88,9 +95,32 @@ class MissionNode(Node):
         self.i = 0               # индекс целевой точки
         self.carrot = None       # текущая уставка (map)
         self.carrot_yaw = 0.0
+        self.done_t = None       # когда сел (для continue_after_s)
         self.create_timer(1.0 / self.rate, self.tick)
 
+    def load_sortie(self, k: int):
+        self.sortie, self.wps = k, self.sorties[k].waypoints
+        self.get_logger().info(
+            f"вылет {k + 1}/{len(self.sorties)}: {len(self.wps)} точек, ~{self.sorties[k].duration_s / 60:.1f} мин")
+
+    def has_next(self) -> bool:
+        return self.series and self.sortie + 1 < len(self.sorties)
+
+    def next_sortie(self):
+        self.load_sortie(self.sortie + 1)
+        self.state, self.ticks, self.i, self.done_t = State.WAIT, 0, 0, None
+
     # --- входы ------------------------------------------------------------
+    def on_continue(self, request, response):
+        if self.state != State.DONE or not self.has_next():
+            response.success = False
+            response.message = (f"сейчас {self.state.value}, продолжать можно только после посадки" if self.state != State.DONE
+                                else "это последний вылет серии" if self.series else "серия выключена (series:=false)")
+        else:
+            self.next_sortie()
+            response.success, response.message = True, f"вылет {self.sortie + 1}/{len(self.sorties)}"
+        return response
+
     def on_position(self, msg: VehicleLocalPosition):
         if msg.xy_valid and msg.z_valid:
             self.pos = px4_to_map((msg.x, msg.y, msg.z), self.dock)
@@ -185,7 +215,19 @@ class MissionNode(Node):
         elif self.state == State.LAND:
             if self.status and self.status.arming_state != VehicleStatus.ARMING_STATE_ARMED:
                 self.get_logger().info("посадка завершена")
-                self.state = State.DONE
+                self.state, self.done_t = State.DONE, self.now_s()
+                if self.has_next():
+                    self.get_logger().info(
+                        f"серия: вылет {self.sortie + 1}/{len(self.sorties)} завершён. Замените АКБ и выполните "
+                        "ros2 service call /mission/continue std_srvs/srv/Trigger" if self.continue_after < 0 else
+                        f"серия: следующий вылет через {self.continue_after:.0f} с (continue_after_s)")
+                elif self.series:
+                    self.get_logger().info(f"серия завершена: {len(self.sorties)} вылетов")
+
+        elif self.state == State.DONE:
+            # scan_recorder сохраняет CSV вылета по первому DONE; дальше — пауза на замену АКБ
+            if self.has_next() and self.continue_after >= 0 and self.now_s() - self.done_t >= self.continue_after:
+                self.next_sortie()
 
     def follow(self):
         target = self.wps[self.i]

@@ -142,7 +142,8 @@ def cmd_economics(a) -> None:
 
 
 def cmd_reconcile(a) -> None:
-    report = reconcile(load_expected_csv(a.expected), load_observations_csv(a.observations))
+    obs = [o for path in a.observations for o in load_observations_csv(path)]   # серия вылетов (FLT-03)
+    report = reconcile(load_expected_csv(a.expected), obs)
     write_report_csv(report, a.out)
     print(json.dumps(report.summary(), ensure_ascii=False))
     print(f"Точность учёта (IRA): {report.accuracy:.1%}; отчёт: {a.out}")
@@ -206,7 +207,8 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("reconcile")
     p.add_argument("expected", help="CSV из WMS/1С: адрес;код")
-    p.add_argument("observations", help="CSV наблюдений: address;code;occupied;confidence")
+    p.add_argument("observations", nargs="+",
+                   help="CSV наблюдений: address;code;occupied;confidence (несколько — вылеты одной серии)")
     p.add_argument("-o", "--out", default="report.csv")
     p.set_defaults(func=cmd_reconcile)
 

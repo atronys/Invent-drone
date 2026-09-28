@@ -20,3 +20,5 @@ for d in sim/tests tools/tests research/tests; do
     (cd "$ROOT" && "$PY" -m unittest discover -s "$d" -t . -q) || { echo "pre-commit: тесты $d упали — коммит отменён"; exit 1; }
   fi
 done
+# логика узлов ROS 2 на заглушках rclpy (ros2_ws/tests/ros_stubs.py) — без установленного ROS
+(cd "$ROOT" && "$PY" -m unittest discover -s ros2_ws/tests -q) || { echo "pre-commit: тесты ros2_ws/tests упали — коммит отменён"; exit 1; }

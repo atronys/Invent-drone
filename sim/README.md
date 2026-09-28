@@ -47,6 +47,11 @@ Launch поднимает мост ros_gz (камеры, depth, `/clock`), `odom
 Проверки: `ros2 topic list | grep fmu` (мост PX4 жив), `ros2 topic echo /mission/status`.
 Узел `scan_recorder` по окончании вылета пишет `~/invent_runs/<время>_sortie<N>.csv`.
 
+Весь склад серией вылетов (FLT-03): `series:=true continue_after_s:=10` — после посадки пауза 10 с
+(«замена АКБ») и следующий вылет плана; без `continue_after_s` узел ждёт команды
+`ros2 service call /mission/continue std_srvs/srv/Trigger`. Каждый вылет — свой CSV; сверка берёт все сразу:
+`python3 -m invent_core reconcile wms.csv ~/invent_runs/<серия>_sortie*.csv -o report.csv`.
+
 ## 4. Метрики и сверка
 
 ```bash
