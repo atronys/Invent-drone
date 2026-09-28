@@ -28,8 +28,9 @@ class SafetyNode(Node):
         self.declare_parameter("depth_hfov_deg", 73.0)     # OakD-Lite в модели PX4: 1.274 рад
         self.declare_parameter("corridor_half_width", 0.45)
         self.declare_parameter("corridor_half_height", 0.35)
-        # высота depth-камеры над base_link (OakD-Lite в sim/make_drone_model.py: .242): пол — не препятствие
-        self.declare_parameter("depth_cam_z", 0.242)
+        # высота depth-сенсора над base_link: OakD-Lite в sim/make_drone_model.py на .242 + сенсор StereoOV7251
+        # в её модели на .019 (PX4 Tools/simulation/gz/models/OakD-Lite). Нужна, чтобы пол не считать препятствием
+        self.declare_parameter("depth_cam_z", 0.26)
         self.declare_parameter("local_position_topic", "/fmu/out/vehicle_local_position_v1")
         wh = Warehouse.load(self.get_parameter("layout").value)
         self.dock = wh.dock
