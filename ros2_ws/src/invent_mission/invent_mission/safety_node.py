@@ -28,6 +28,8 @@ class SafetyNode(Node):
         self.declare_parameter("depth_hfov_deg", 73.0)     # OakD-Lite в модели PX4: 1.274 рад
         self.declare_parameter("corridor_half_width", 0.45)
         self.declare_parameter("corridor_half_height", 0.35)
+        # высота depth-камеры над base_link (OakD-Lite в sim/make_drone_model.py: .242): пол — не препятствие
+        self.declare_parameter("depth_cam_z", 0.242)
         self.declare_parameter("local_position_topic", "/fmu/out/vehicle_local_position_v1")
         wh = Warehouse.load(self.get_parameter("layout").value)
         self.dock = wh.dock
@@ -36,6 +38,7 @@ class SafetyNode(Node):
         self.bridge = CvBridge()
         self.cam = None
         self.speed = 0.0
+        self.z = None             # высота base_link над полом (map), м; None — пол не отсекаем
         self.outside = False
         self.pub_state = self.create_publisher(String, "safety/state", 10)
         self.pub_dist = self.create_publisher(Float32, "safety/min_distance", 10)
@@ -49,6 +52,7 @@ class SafetyNode(Node):
         self.speed = math.hypot(msg.vx, msg.vy)
         if msg.xy_valid and msg.z_valid:
             p = px4_to_map((msg.x, msg.y, msg.z), self.dock)
+            self.z = max(0.0, p[2])
             outside = not self.geofence.contains(p)
             if outside and not self.outside:
                 self.get_logger().error(f"выход из геозоны: {tuple(round(v, 2) for v in p)} — STOP")
@@ -62,8 +66,9 @@ class SafetyNode(Node):
             hfov = self.get_parameter("depth_hfov_deg").value
             fx = msg.width / (2 * math.tan(math.radians(hfov) / 2))
             self.cam = Camera.from_intrinsics(msg.width, msg.height, fx, fx, msg.width / 2, msg.height / 2)
+        cam_h = None if self.z is None else self.z + self.get_parameter("depth_cam_z").value
         d = corridor_min_distance(depth, self.cam, self.get_parameter("corridor_half_width").value,
-                                  self.get_parameter("corridor_half_height").value)
+                                  self.get_parameter("corridor_half_height").value, cam_height=cam_h)
         state = STOP if self.outside else self.monitor.update(d, self.speed)
         self.pub_dist.publish(Float32(data=float(min(d, 1e3))))
         self.pub_state.publish(String(data=state))

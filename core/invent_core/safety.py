@@ -19,10 +19,14 @@ GO, SLOW, STOP = "GO", "SLOW", "STOP"
 
 
 def corridor_min_distance(depth, cam: Camera, half_width: float = 0.45, half_height: float = 0.35,
-                          max_range: float = 8.0, stride: int = 2) -> float:
+                          max_range: float = 8.0, stride: int = 2, cam_height: float | None = None,
+                          floor_clearance: float = 0.1) -> float:
     """Ближайшая дистанция (м) до точки depth-кадра внутри коридора |x| <= half_width, |y| <= half_height.
 
     depth — массив HxW в метрах (numpy); 0, NaN и inf — нет данных. Нет точек в коридоре -> inf.
+    cam_height — высота камеры над полом, м (камера без наклона). Тогда точки ниже floor_clearance над полом
+    не препятствие: камера на доке стоит ~0.3 м над полом, и пол попадает в коридор высотой ±0.35 м уже
+    с ~0.55 м — без этого STOP на доке и дрон не взлетит. Недооценка высоты безопасна: отбрасывается больше пола.
     """
     import numpy as np
     full = np.asarray(depth, dtype=np.float32)
@@ -32,9 +36,12 @@ def corridor_min_distance(depth, cam: Camera, half_width: float = 0.45, half_hei
     u = (np.arange(0, w0, stride) * (cam.width / w0))[None, :]
     v = (np.arange(0, h0, stride) * (cam.height / h0))[:, None]
     valid = np.isfinite(d) & (d > 0.05) & (d < max_range)
+    d = np.where(valid, d, 0.0)          # inf·0 даёт NaN и предупреждения numpy
     x = (u - cam.cx) / cam.fx * d
-    y = (v - cam.cy) / cam.fy * d
+    y = (v - cam.cy) / cam.fy * d        # оптический кадр: y вниз
     inside = valid & (np.abs(x) <= half_width) & (np.abs(y) <= half_height)
+    if cam_height is not None:
+        inside &= (cam_height - y) >= floor_clearance
     return float(d[inside].min()) if inside.any() else float("inf")
 
 

@@ -49,6 +49,26 @@ class TestSafetyBubble(unittest.TestCase):
         depth[:, :60] = 1.0                                       # стеллаж сбоку: на 1 м x ≈ -0.6 м — вне коридора
         self.assertEqual(corridor_min_distance(depth, self.cam), math.inf)
 
+    def floor(self, h):
+        """Depth-кадр пустого пола для камеры на высоте h без наклона."""
+        yn = (np.arange(480)[:, None] - self.cam.cy) / self.cam.fy
+        return np.where(yn > 1e-6, h / np.maximum(yn, 1e-9), np.inf) * np.ones((1, 640))
+
+    def test_floor_is_not_an_obstacle(self):
+        """Камера на доке ~0.3 м над полом: без высоты пол даёт STOP (< 1 м), с высотой — нет."""
+        depth = self.floor(0.3)
+        self.assertLess(corridor_min_distance(depth, self.cam), 1.0)
+        self.assertEqual(corridor_min_distance(depth, self.cam, cam_height=0.3), math.inf)
+        # недооценка высоты (опоры шасси не учтены) — пол всё равно отброшен
+        self.assertEqual(corridor_min_distance(depth, self.cam, cam_height=0.25), math.inf)
+
+    def test_box_on_floor_still_detected(self):
+        depth = self.floor(0.3)
+        box = np.zeros_like(depth, dtype=bool)
+        box[240 - int(450 * 0.1 / 1.5):, 300:340] = True           # коробка высотой 0.4 м в 1.5 м: верх на 0.1 м выше оси
+        depth = np.where(box & (depth > 1.5), 1.5, depth)
+        self.assertAlmostEqual(corridor_min_distance(depth, self.cam, cam_height=0.3), 1.5, places=5)
+
     def test_monitor_hysteresis(self):
         m = SafetyMonitor(clear_frames=3)
         self.assertEqual(m.update(5.0, 0.4), GO)
