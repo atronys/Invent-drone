@@ -57,6 +57,12 @@ cd .. && python research/landmark_ekf/ekf_sim.py --seeds 10 --plot   # эксп�
 Тесты (их же гоняет хук перед коммитом): `core/tests`, `sim/tests`, `tools/tests`, `research/tests`;
 медленные (виртуальный облёт 12 Мп) — с `INVENT_SLOW_TESTS=1`.
 
+Узлы ROS 2 проверяются и без ROS (`python -m unittest discover -s ros2_ws/tests`): заглушки rclpy/px4_msgs/tf2
+(`ros2_ws/tests/ros_stubs.py`) и игрушечный PX4 прогоняют автомат миссии и серию вылетов, цепочку кадров
+«одометрия PX4 → odom_tf → TF → label_reader» на отрендеренных кадрах, fake_vio → landmark_localizer → PX4,
+safety_monitor, а также сверяют параметры `sim_mission.launch.py` с кодом узлов. Что заглушки **не** проверяют:
+мост ros_gz, PX4 SITL, Gazebo, реальные тайминги — это `scripts/smoke_sitl.sh`.
+
 Симуляция и ROS 2 — на Ubuntu 24.04: `bash scripts/setup_ubuntu.sh`, затем [sim/README.md](sim/README.md).
 
 ### WSL (Windows)
