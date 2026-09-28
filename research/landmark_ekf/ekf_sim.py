@@ -26,6 +26,7 @@ import argparse
 import math
 import random
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -35,6 +36,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "core"))
 from invent_core.coverage import ScanParams, plan, segment_time  # noqa: E402
 from invent_core.layout import Warehouse, make_grid_warehouse  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from window_smoother import WindowSmoother, compose  # noqa: E402
 
 CHI2_2DOF_99 = 9.21  # χ²(2 степени свободы, 99%)
 
@@ -184,6 +188,7 @@ class RunResult:
     accepted: int = 0
     rejected: int = 0
     errors: list = field(default_factory=list)
+    cpu_s: float = 0.0   # время оценщика (без моделирования)
 
 
 def run(truth: np.ndarray, dt: float, scenario: str, lms: list[Landmark], sm: SensorModel, seed: int) -> RunResult:
@@ -195,9 +200,16 @@ def run(truth: np.ndarray, dt: float, scenario: str, lms: list[Landmark], sm: Se
     yaw_bias = math.radians(rng.normal(0, sm.yaw_bias_deg_min)) / 60 * dt
     path = 0.0
     est = truth[0].copy()
-    ekf = EKF(truth[0].copy(), np.diag([0.02, 0.02, math.radians(1)]) ** 2, gate=scenario != "labels_nogate")
+    P0 = np.diag([0.02, 0.02, math.radians(1)]) ** 2
+    win = "_win" in scenario                      # оптимизация в окне (гл. 9) вместо EKF (гл. 8)
+    base = scenario.split("_win")[0]
+    ekf = EKF(truth[0].copy(), P0, gate=scenario != "labels_nogate")
+    # _win — ядро Хьюбера + порог χ² (как у EKF); _winh — только ядро Хьюбера (как в книге, гл. 8.2.6)
+    sw = WindowSmoother(truth[0].copy(), P0, gate=None if scenario.endswith("_winh") else CHI2_2DOF_99) if win else None
+    rel, rel_var = np.zeros(3), np.zeros(3)       # одометрия с последнего ключевого кадра
     obs_every = max(1, round(1 / (sm.obs_rate_hz * dt)))
     errors = []
+    cpu = 0.0
     for k in range(1, len(truth)):
         a, b = truth[k - 1], truth[k]
         c, s = math.cos(a[2]), math.sin(a[2])
@@ -214,7 +226,16 @@ def run(truth: np.ndarray, dt: float, scenario: str, lms: list[Landmark], sm: Se
             ce, se = math.cos(est[2]), math.sin(est[2])
             est = np.array([est[0] + ce * u[0] - se * u[1], est[1] + se * u[0] + ce * u[1], wrap(est[2] + u[2])])
         else:
-            ekf.predict(u, R_u)
+            t0 = time.perf_counter()
+            if win:
+                rel = compose(rel, u)
+                rel_var += np.diag(R_u)
+                if k % obs_every == 0:                  # ключевой кадр на каждом кадре камеры
+                    sw.add_keyframe(rel, np.diag(rel_var))
+                    rel, rel_var = np.zeros(3), np.zeros(3)
+            else:
+                ekf.predict(u, R_u)
+            cpu += time.perf_counter() - t0
             if k % obs_every == 0:
                 for lm in lms:
                     if not visible(b, lm, sm) or obs_rng.random() > sm.p_detect:
@@ -223,29 +244,44 @@ def run(truth: np.ndarray, dt: float, scenario: str, lms: list[Landmark], sm: Se
                     sigma = sm.obs_sigma0 + sm.obs_sigma_k * rng_m
                     z = body_frame(b, lm.x, lm.y) + obs_rng.normal(0, sigma, 2)
                     mx, my = lm.map_x, lm.map_y
-                    if scenario != "tags" and obs_rng.random() < sm.p_misassoc:
+                    if base != "tags" and obs_rng.random() < sm.p_misassoc:
                         mx += obs_rng.choice((-1, 1)) * sm.slot_width  # прочитали, но привязали к соседней ячейке
-                    sig_map = MAP_SIGMA["tags" if scenario == "tags" else "pallets" if scenario == "pallets" else "labels"]
+                    sig_map = MAP_SIGMA["tags" if base == "tags" else "pallets" if base == "pallets" else "labels"]
                     q = sigma ** 2 + sig_map ** 2                 # ошибка карты — тоже шум наблюдения
-                    ekf.update(z, mx, my, np.diag([q, q]))
-            est = ekf.mu
+                    t0 = time.perf_counter()
+                    if win:
+                        sw.add_obs(z, (mx, my), np.diag([q, q]))
+                    else:
+                        ekf.update(z, mx, my, np.diag([q, q]))
+                    cpu += time.perf_counter() - t0
+            t0 = time.perf_counter()
+            if win:
+                if k % obs_every == 0:
+                    sw.optimize()
+                est = compose(sw.latest, rel)
+            else:
+                est = ekf.mu
+            cpu += time.perf_counter() - t0
         errors.append(math.hypot(est[0] - b[0], est[1] - b[1]))
     e = np.array(errors)
-    return RunResult(float(np.sqrt(np.mean(e ** 2))), path, float(e.max()), float(e[-1]), ekf.accepted,
-                     ekf.rejected, errors)
+    acc, rej = (sw.total_obs - sw.downweighted, sw.downweighted) if win else (ekf.accepted, ekf.rejected)
+    return RunResult(float(np.sqrt(np.mean(e ** 2))), path, float(e.max()), float(e[-1]), acc, rej, errors, cpu)
 
 
 SCENARIOS = {"odom": "labels", "tags": "tags", "labels": "labels", "labels_nogate": "labels", "pallets": "pallets"}
+# оптимизация в скользящем окне (гл. 9) на тех же данных: --window
+WINDOW_SCENARIOS = {"tags_win": "tags", "labels_win": "labels", "pallets_win": "pallets", "pallets_winh": "pallets"}
 
 
-def experiment(wh: Warehouse, seeds: int, dt: float = 0.1, sm: SensorModel | None = None):
+def experiment(wh: Warehouse, seeds: int, dt: float = 0.1, sm: SensorModel | None = None, window: bool = False):
     sm = sm or SensorModel()
     p = ScanParams()
     pl = plan(wh, p)
     trajs = [true_trajectory(s.waypoints, p, dt) for s in pl.sorties]
-    results = {name: [] for name in SCENARIOS}
+    scenarios = {**SCENARIOS, **(WINDOW_SCENARIOS if window else {})}
+    results = {name: [] for name in scenarios}
     for seed in range(seeds):
-        for name, kind in SCENARIOS.items():
+        for name, kind in scenarios.items():
             lms = make_landmarks(wh, kind, random.Random(seed))
             for i, tr in enumerate(trajs):
                 results[name].append(run(tr, dt, name, lms, sm, seed * 100 + i))
@@ -254,15 +290,16 @@ def experiment(wh: Warehouse, seeds: int, dt: float = 0.1, sm: SensorModel | Non
 
 def summarize(results) -> str:
     lines = ["| Сценарий | ATE_trans, м (ф. 3.45) | Макс. ошибка, м | Ошибка в конце, м | В конце, % пути "
-             "| Отброшено гейтингом |", "|---|---|---|---|---|---|"]
+             "| Отброшено гейтингом / ослаблено ядром | CPU оценщика, с/вылет |", "|---|---|---|---|---|---|---|"]
     for name, rs in results.items():
         ate = np.array([r.ate for r in rs])
         mx = np.array([r.max_err for r in rs])
         fin = np.array([r.final_err for r in rs])
         rej = sum(r.rejected for r in rs) / max(1, sum(r.rejected + r.accepted for r in rs))
         pct = np.mean([r.final_err / r.path for r in rs])
+        cpu = np.mean([r.cpu_s for r in rs])
         lines.append(f"| {name} | {ate.mean():.3f} ± {ate.std():.3f} | {mx.mean():.3f} | {fin.mean():.3f} | "
-                     f"{pct:.2%} | {rej:.1%} |")
+                     f"{pct:.2%} | {rej:.1%} | {cpu:.2f} |")
     return "\n".join(lines)
 
 
@@ -273,12 +310,13 @@ def main() -> None:
     ap.add_argument("--plot", action="store_true", help="сохранить error_vs_time.png")
     ap.add_argument("--scale-err", type=float, default=SensorModel.scale_err, help="СКО ошибки масштаба VIO")
     ap.add_argument("--yaw-bias", type=float, default=SensorModel.yaw_bias_deg_min, help="СКО дрейфа курса, град/мин")
+    ap.add_argument("--window", action="store_true", help="добавить оптимизацию в скользящем окне (гл. 9)")
     a = ap.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     wh = Warehouse.load(a.layout) if a.layout else make_grid_warehouse()
     sm = SensorModel(scale_err=a.scale_err, yaw_bias_deg_min=a.yaw_bias)
-    results, trajs = experiment(wh, a.seeds, sm=sm)
+    results, trajs = experiment(wh, a.seeds, sm=sm, window=a.window)
     table = summarize(results)
     print(table)
     if a.plot:
@@ -287,7 +325,7 @@ def main() -> None:
         import matplotlib.pyplot as plt
         fig, ax = plt.subplots(figsize=(9, 4))
         t = np.arange(len(results["odom"][0].errors)) * 0.1
-        for name in SCENARIOS:
+        for name in results:
             ax.plot(t, results[name][0].errors, label=name, lw=1)
         ax.set_xlabel("время, с (вылет 1, seed 0)")
         ax.set_ylabel("ошибка положения, м")

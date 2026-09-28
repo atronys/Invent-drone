@@ -32,6 +32,41 @@ if grep -qi microsoft /proc/version 2>/dev/null && [[ "$PROJECT_DIR" == /mnt/* ]
   exit 1
 fi
 
+# --- Зеркала -------------------------------------------------------------------------------
+# В РФ и в WSL при VPN на Windows официальные репозитории часто недоступны или рвутся (проверено 28.09.2026:
+# packages.ros.org и pypi.org не отвечали, archive.ubuntu.com по HTTP — через раз). MIRRORS=auto (по умолчанию)
+# проверяет доступность и при необходимости переключает: Ubuntu -> mirror.yandex.ru, ROS 2 -> mirrors.ustc.edu.cn,
+# Gazebo -> HTTPS, pip -> mirrors.aliyun.com. MIRRORS=off — не трогать; MIRRORS=on — переключить сразу.
+MIRRORS="${MIRRORS:-auto}"
+UBUNTU_MIRROR="${UBUNTU_MIRROR:-https://mirror.yandex.ru/ubuntu/}"
+ROS_MIRROR="${ROS_MIRROR:-https://mirrors.ustc.edu.cn/ros2/ubuntu}"
+PIP_MIRROR="${PIP_MIRROR:-https://mirrors.aliyun.com/pypi/simple/}"
+reachable() { curl -s -o /dev/null -m 10 -f "$1"; }
+use_mirrors=false
+if [ "$MIRRORS" = "on" ]; then use_mirrors=true
+elif [ "$MIRRORS" = "auto" ]; then
+  reachable "http://archive.ubuntu.com/ubuntu/dists/noble/Release" && reachable "https://pypi.org/simple/pip/" \
+    && reachable "http://packages.ros.org/ros2/ubuntu/dists/noble/Release" || use_mirrors=true
+fi
+configure_ros_mirror() {   # вызывается после установки ros2-apt-source
+  [ -f /etc/apt/sources.list.d/ros2.sources ] && ! grep -q "$ROS_MIRROR" /etc/apt/sources.list.d/ros2.sources && {
+    sudo cp -n /etc/apt/sources.list.d/ros2.sources /etc/apt/sources.list.d/ros2.sources.bak
+    sudo sed -i "s#^URIs:.*#URIs: $ROS_MIRROR#" /etc/apt/sources.list.d/ros2.sources; }
+  [ -f /etc/apt/sources.list.d/gazebo-stable.list ] && sudo sed -i "s#http://packages.osrfoundation.org#https://packages.osrfoundation.org#" /etc/apt/sources.list.d/gazebo-stable.list
+  return 0
+}
+if $use_mirrors; then
+  echo "== 0/5 Зеркала: Ubuntu $UBUNTU_MIRROR, ROS 2 $ROS_MIRROR, pip $PIP_MIRROR"
+  echo 'Acquire::Retries "10";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
+  if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+    sudo cp -n /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources.bak
+    sudo sed -i "s#^URIs:.*#URIs: $UBUNTU_MIRROR#" /etc/apt/sources.list.d/ubuntu.sources
+  fi
+  configure_ros_mirror
+  mkdir -p ~/.config/pip
+  printf '[global]\nindex-url = %s\ntimeout = 60\n' "$PIP_MIRROR" > ~/.config/pip/pip.conf
+fi
+
 echo "== 1/5 ROS 2 Jazzy"
 if [ ! -f /opt/ros/jazzy/setup.bash ]; then
   sudo apt update && sudo apt install -y software-properties-common curl git
@@ -40,8 +75,9 @@ if [ ! -f /opt/ros/jazzy/setup.bash ]; then
   curl -L -o /tmp/ros2-apt-source.deb \
     "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.${VERSION_CODENAME}_all.deb"
   sudo dpkg -i /tmp/ros2-apt-source.deb
-  sudo apt update
 fi
+$use_mirrors && configure_ros_mirror
+sudo apt update
 sudo apt install -y ros-jazzy-desktop ros-dev-tools ros-jazzy-ros-gz ros-jazzy-cv-bridge python3-pip
 
 echo "== 2/5 PX4-Autopilot $PX4_VERSION (SITL + Gazebo Harmonic)"
@@ -49,7 +85,14 @@ mkdir -p "$SRC"
 if [ ! -d "$SRC/PX4-Autopilot" ]; then
   git clone --recursive -b "$PX4_VERSION" https://github.com/PX4/PX4-Autopilot.git "$SRC/PX4-Autopilot"
 fi
-bash "$SRC/PX4-Autopilot/Tools/setup/ubuntu.sh" --no-nuttx
+PX4_SETUP="$SRC/PX4-Autopilot/Tools/setup/ubuntu.sh"
+if $use_mirrors; then
+  # скрипт PX4 каждый раз заново пишет репозиторий Gazebo по HTTP (у нас недоступен) — запускаем копию с HTTPS;
+  # копия лежит рядом с оригиналом, чтобы нашёлся его requirements.txt
+  sed 's#http://packages.osrfoundation.org#https://packages.osrfoundation.org#g' "$PX4_SETUP" > "${PX4_SETUP%.sh}_https.sh"
+  PX4_SETUP="${PX4_SETUP%.sh}_https.sh"
+fi
+bash "$PX4_SETUP" --no-nuttx
 (cd "$SRC/PX4-Autopilot" && make px4_sitl)
 
 echo "== 3/5 Micro XRCE-DDS Agent $XRCE_AGENT_VERSION"
