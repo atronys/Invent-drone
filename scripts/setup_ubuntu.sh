@@ -9,6 +9,12 @@ PX4_VERSION="${PX4_VERSION:-v1.17.0}"            # последний стаби
 XRCE_AGENT_VERSION="${XRCE_AGENT_VERSION:-v2.4.3}"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${SRC:-$HOME/src}"
+# Параллельная сборка: ~1 ГБ ОЗУ на компилятор C++ (в WSL по умолчанию памяти мало — не больше ОЗУ/1.2 ГБ)
+MEM_GB=$(awk '/MemTotal/ {print int($2/1024/1024)}' /proc/meminfo)
+JOBS="${JOBS:-$(( MEM_GB * 10 / 12 < $(nproc) ? MEM_GB * 10 / 12 : $(nproc) ))}"
+[ "$JOBS" -ge 1 ] || JOBS=1
+export CMAKE_BUILD_PARALLEL_LEVEL="$JOBS" MAKEFLAGS="-j$JOBS"
+echo "Сборка в $JOBS потоков (ОЗУ ${MEM_GB} ГБ)"
 
 . /etc/os-release
 if [ "$VERSION_ID" != "24.04" ]; then
@@ -51,7 +57,7 @@ if ! command -v MicroXRCEAgent >/dev/null; then
   [ -d "$SRC/Micro-XRCE-DDS-Agent" ] || \
     git clone -b "$XRCE_AGENT_VERSION" https://github.com/eProsima/Micro-XRCE-DDS-Agent.git "$SRC/Micro-XRCE-DDS-Agent"
   cmake -S "$SRC/Micro-XRCE-DDS-Agent" -B "$SRC/Micro-XRCE-DDS-Agent/build"
-  cmake --build "$SRC/Micro-XRCE-DDS-Agent/build" -j"$(nproc)"
+  cmake --build "$SRC/Micro-XRCE-DDS-Agent/build" -j"$JOBS"
   sudo cmake --install "$SRC/Micro-XRCE-DDS-Agent/build"
   sudo ldconfig /usr/local/lib/
 fi
@@ -70,7 +76,7 @@ fi
 sudo apt install -y python3-numpy python3-opencv python3-matplotlib
 pip3 install --user --break-system-packages zxing-cpp python-barcode pillow
 set +u; source /opt/ros/jazzy/setup.bash
-(cd "$PROJECT_DIR/ros2_ws" && colcon build --symlink-install)
+(cd "$PROJECT_DIR/ros2_ws" && colcon build --symlink-install --parallel-workers "$JOBS")
 
 echo "== 5/5 Переменные окружения (~/.bashrc)"
 if ! grep -q "# INVENT_DRONE" ~/.bashrc; then
