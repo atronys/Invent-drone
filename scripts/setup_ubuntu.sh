@@ -16,6 +16,16 @@ if [ "$VERSION_ID" != "24.04" ]; then
   exit 1
 fi
 
+# WSL: проект на диске Windows (/mnt/c/...) собирать нельзя — colcon --symlink-install и сборка там
+# медленные и ненадёжные. Клонируйте репозиторий в файловую систему Linux и запускайте оттуда:
+#   git clone /mnt/c/INVENT_DRONE ~/INVENT_DRONE && cd ~/INVENT_DRONE && bash scripts/setup_ubuntu.sh
+if grep -qi microsoft /proc/version 2>/dev/null && [[ "$PROJECT_DIR" == /mnt/* ]] && [ -z "$FORCE_MNT" ]; then
+  echo "WSL: проект лежит на диске Windows ($PROJECT_DIR)."
+  echo "Сделайте: git clone $PROJECT_DIR ~/INVENT_DRONE && cd ~/INVENT_DRONE && bash scripts/setup_ubuntu.sh"
+  echo "(изменения с Windows забирайте в WSL командой git pull; принудительно — FORCE_MNT=1)"
+  exit 1
+fi
+
 echo "== 1/5 ROS 2 Jazzy"
 if [ ! -f /opt/ros/jazzy/setup.bash ]; then
   sudo apt update && sudo apt install -y software-properties-common curl git
@@ -57,6 +67,7 @@ if [ ! -d "$PROJECT_DIR/ros2_ws/src/px4_msgs" ]; then
   }
 fi
 # Ubuntu 24.04 запрещает pip в системный Python (PEP 668); пакеты чисто пользовательские, это безопасно.
+sudo apt install -y python3-numpy python3-opencv python3-matplotlib
 pip3 install --user --break-system-packages zxing-cpp python-barcode pillow
 set +u; source /opt/ros/jazzy/setup.bash
 (cd "$PROJECT_DIR/ros2_ws" && colcon build --symlink-install)
