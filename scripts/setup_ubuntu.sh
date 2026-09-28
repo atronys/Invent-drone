@@ -52,6 +52,8 @@ configure_ros_mirror() {   # вызывается после установки 
   [ -f /etc/apt/sources.list.d/ros2.sources ] && ! grep -q "$ROS_MIRROR" /etc/apt/sources.list.d/ros2.sources && {
     sudo cp -n /etc/apt/sources.list.d/ros2.sources /etc/apt/sources.list.d/ros2.sources.bak
     sudo sed -i "s#^URIs:.*#URIs: $ROS_MIRROR#" /etc/apt/sources.list.d/ros2.sources; }
+  # на зеркале нет исходных пакетов (deb-src -> 404 и падение apt update) — берём только бинарные
+  [ -f /etc/apt/sources.list.d/ros2.sources ] && sudo sed -i "s#^Types:.*#Types: deb#" /etc/apt/sources.list.d/ros2.sources
   [ -f /etc/apt/sources.list.d/gazebo-stable.list ] && sudo sed -i "s#http://packages.osrfoundation.org#https://packages.osrfoundation.org#" /etc/apt/sources.list.d/gazebo-stable.list
   return 0
 }
