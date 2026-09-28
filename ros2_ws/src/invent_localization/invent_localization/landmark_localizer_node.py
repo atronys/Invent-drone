@@ -131,7 +131,10 @@ class LandmarkLocalizerNode(Node):
         if self.px4 is not None:
             pos, q = map_pose_to_px4((x, y, z), q_map, self.wh.dock)
             m = VehicleOdometry()
-            m.timestamp = m.timestamp_sample = self.get_clock().now().nanoseconds // 1000
+            # 0 = «время прихода в PX4». Иначе uXRCE-DDS вычитает смещение timesync, посчитанное по системным
+            # часам агента (Tools/msg/templates/ucdr/msg.h.em, v1.17), а узел в SITL живёт на времени симуляции.
+            # Задержку наблюдения учитывает EKF2_EV_DELAY.
+            m.timestamp = m.timestamp_sample = 0
             m.pose_frame = VehicleOdometry.POSE_FRAME_NED
             m.position = [float(v) for v in pos]
             m.q = [float(v) for v in q]

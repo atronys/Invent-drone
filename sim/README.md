@@ -66,6 +66,8 @@ python3 -m invent_core reconcile sim/worlds/demo/wms_expected.csv ~/invent_runs/
 param set EKF2_GPS_CTRL 0
 param set EKF2_EV_CTRL 11
 param set EKF2_HGT_REF 3
+param set EKF2_EV_DELAY 50     # мс: кадр -> поза; узел шлёт timestamp=0 («время прихода»), задержку знает только EKF2
+param set EKF2_EVP_NOISE 0.03  # нижняя граница СКО позиции, м (по умолчанию 0.1 — грубее нашей локализации)
 param save
 # запуск с «фальшивым VIO» (истина Gazebo + дрейф) и локализацией по адресным этикеткам -> /fmu/in/vehicle_visual_odometry
 ros2 launch invent_bringup sim_mission.launch.py layout:=... model_dir:=... localization:=true
@@ -73,7 +75,11 @@ ros2 launch invent_bringup sim_mission.launch.py layout:=... model_dir:=... loca
 
 Проверено по исходникам PX4 v1.17.0 (`src/modules/ekf2/module.yaml`): биты `EKF2_EV_CTRL` — 0 горизонтальная
 позиция, 1 вертикальная, 2 скорость, 3 курс (11 = 0+1+3); `EKF2_HGT_REF=3` — Vision, **требует перезапуска PX4**.
-Имя и маску `EKF2_GPS_CTRL` сверить в `param show EKF2_GPS*`.
+`EKF2_GPS_CTRL` — битовая маска (по умолчанию 7: 0 широта/долгота, 1 высота, 2 скорость), 0 — GPS выключен
+(`params_gnss.yaml`). `EKF2_EV_NOISE_MD=0` (по умолчанию): шум берётся из дисперсий сообщения, но не ниже
+`EKF2_EVP_NOISE`/`EKF2_EVA_NOISE` (`params_external_vision.yaml`). Метки времени: входящее `timestamp`
+PX4 пересчитывает по смещению timesync от системных часов агента, а 0 заменяет временем прихода
+(`Tools/msg/templates/ucdr/msg.h.em`) — поэтому `landmark_localizer` (он на времени симуляции) шлёт 0.
 
 ## Что дальше (backlog)
 

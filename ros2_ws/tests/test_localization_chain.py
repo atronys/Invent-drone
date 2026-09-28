@@ -155,6 +155,7 @@ class LocalizationChainTest(unittest.TestCase):
         last = r.px4[-1]
         np.testing.assert_allclose(px4_to_map(tuple(last.position), self.wh.dock), self.pos(r.loc[-1]), atol=1e-6)
         self.assertTrue(all(v == v and v >= 0 for v in last.position_variance))
+        self.assertEqual((last.timestamp, last.timestamp_sample), (0, 0))   # PX4 подставит время прихода
         self.assertIn("odom", r.tf)
         self.assertEqual(r.tf["odom"].header.frame_id, "map")
 
