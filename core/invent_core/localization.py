@@ -76,11 +76,16 @@ def observe(state: np.ndarray, landmark: np.ndarray, mc: MountedCamera, roll: fl
 class LandmarkLocalizer:
     """EKF: прогноз по VIO, обновление по пикселям адресных этикеток с известными координатами."""
 
-    def __init__(self, mu0, sigma0=(0.02, 0.02, 0.02, math.radians(1.0)), gate: float | None = CHI2_2DOF_99):
+    def __init__(self, mu0, sigma0=(0.02, 0.02, 0.02, math.radians(1.0)), gate: float | None = CHI2_2DOF_99,
+                 inflate_after: int | None = None, inflate_factor: float = 4.0):
+        """inflate_after (LOC-12): после стольких отказов подряд раздуть P в inflate_factor раз — фильтр
+        признаёт, что «потерялся» (редкие ориентиры + плохой VIO). По умолчанию выключено: на паллетных
+        этикетках это пропускает постоянные выбросы (research/landmark_ekf/README.md, LOC-12)."""
         self.mu = np.array(mu0, dtype=float)
         self.P = np.diag(np.square(sigma0))
         self.gate = gate
-        self.accepted = self.rejected = 0
+        self.inflate_after, self.inflate_factor = inflate_after, inflate_factor
+        self.accepted = self.rejected = self.streak = self.inflations = 0
 
     def predict(self, d_body_xy, dz: float, dpsi: float, sigma_xy: float, sigma_z: float, sigma_psi: float) -> None:
         """Ф. (8.32): приращение из VIO в кадре тела (x вперёд, y влево) + вертикаль + курс."""
@@ -105,7 +110,13 @@ class LandmarkLocalizer:
         S = H @ self.P @ H.T + np.eye(2) * sigma_px ** 2
         if self.gate is not None and float(nu @ np.linalg.solve(S, nu)) > self.gate:
             self.rejected += 1
+            self.streak += 1
+            if self.inflate_after and self.streak >= self.inflate_after:
+                self.P = self.P * self.inflate_factor
+                self.streak = 0
+                self.inflations += 1
             return False
+        self.streak = 0
         K = self.P @ H.T @ np.linalg.inv(S)
         self.mu = self.mu + K @ nu
         self.mu[3] = math.atan2(math.sin(self.mu[3]), math.cos(self.mu[3]))

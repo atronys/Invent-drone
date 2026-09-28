@@ -96,5 +96,29 @@ class TestLocalizerOnPass(unittest.TestCase):
         self.assertLess(worst_g, 0.10)
 
 
+@unittest.skipIf(np is None, "нужен numpy")
+class TestCovarianceInflation(unittest.TestCase):
+    """LOC-12: после серии отказов подряд фильтр раздувает P и снова принимает верные наблюдения."""
+
+    def test_inflation_recovers_from_overconfidence(self):
+        wh = make_grid_warehouse()
+        lms = address_landmarks(wh)
+        cam = Camera(3040, 4056, 22.2, 29.4)
+        mc = MountedCamera.side(cam, "left")
+        truth = (5.0, wh.aisles[0].y, 1.9, 0.0)
+        r, t = fr.camera_pose(truth[:3], 0.0, "left", t_body_cam=(0.0, 0.0, 0.12))
+        L = next(v for v in lms.values() if v[1] > truth[1] and abs(v[0] - 5.0) < 0.2 and abs(v[2] - 1.74) < 0.01)
+        uv = project_to_image(tuple(L), cam, r, t)
+        for inflate, expect_accept in ((None, False), (3, True)):
+            # самоуверенный фильтр со сдвигом 0.4 м: верное наблюдение не проходит порог
+            loc = LandmarkLocalizer((5.4, truth[1], 1.9, 0.0), sigma0=(0.01, 0.01, 0.01, 0.005),
+                                    inflate_after=inflate)
+            accepted = any(loc.update_pixel(uv, L, mc) for _ in range(20))
+            self.assertEqual(accepted, expect_accept)
+            if expect_accept:
+                self.assertGreater(loc.inflations, 0)
+                self.assertLess(abs(loc.mu[0] - 5.0), 0.4)
+
+
 if __name__ == "__main__":
     unittest.main()

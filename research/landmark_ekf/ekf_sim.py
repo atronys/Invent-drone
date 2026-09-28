@@ -146,6 +146,12 @@ class EKF:
     gate: bool = True
     rejected: int = 0
     accepted: int = 0
+    # LOC-12: после inflate_after отказов подряд фильтр признаёт, что «потерялся», и раздувает P,
+    # чтобы снова принимать верные наблюдения (ловушка редких ориентиров при плохом VIO)
+    inflate_after: int | None = None
+    inflate_factor: float = 4.0
+    streak: int = 0
+    inflations: int = 0
 
     def predict(self, u: np.ndarray, R_u: np.ndarray) -> None:
         """Ф. (8.32): μ = f(μ, u), P = F P Fᵀ + R. u = (dx, dy, dψ) в кадре тела."""
@@ -168,7 +174,13 @@ class EKF:
         nu = z - h
         if self.gate and float(nu @ np.linalg.solve(S, nu)) > CHI2_2DOF_99:
             self.rejected += 1
+            self.streak += 1
+            if self.inflate_after and self.streak >= self.inflate_after:
+                self.P = self.P * self.inflate_factor
+                self.streak = 0
+                self.inflations += 1
             return False
+        self.streak = 0
         K = self.P @ H.T @ np.linalg.inv(S)                 # (8.34)
         self.mu = self.mu + K @ nu                           # (8.35)
         self.mu[2] = wrap(self.mu[2])
@@ -202,8 +214,9 @@ def run(truth: np.ndarray, dt: float, scenario: str, lms: list[Landmark], sm: Se
     est = truth[0].copy()
     P0 = np.diag([0.02, 0.02, math.radians(1)]) ** 2
     win = "_win" in scenario                      # оптимизация в окне (гл. 9) вместо EKF (гл. 8)
-    base = scenario.split("_win")[0]
-    ekf = EKF(truth[0].copy(), P0, gate=scenario != "labels_nogate")
+    base = scenario.split("_")[0]                 # tags / labels / pallets / odom
+    ekf = EKF(truth[0].copy(), P0, gate=scenario != "labels_nogate",
+              inflate_after=3 if scenario.endswith("_adapt") else None)
     # _win — ядро Хьюбера + порог χ² (как у EKF); _winh — только ядро Хьюбера (как в книге, гл. 8.2.6)
     sw = WindowSmoother(truth[0].copy(), P0, gate=None if scenario.endswith("_winh") else CHI2_2DOF_99) if win else None
     rel, rel_var = np.zeros(3), np.zeros(3)       # одометрия с последнего ключевого кадра
@@ -271,14 +284,17 @@ def run(truth: np.ndarray, dt: float, scenario: str, lms: list[Landmark], sm: Se
 SCENARIOS = {"odom": "labels", "tags": "tags", "labels": "labels", "labels_nogate": "labels", "pallets": "pallets"}
 # оптимизация в скользящем окне (гл. 9) на тех же данных: --window
 WINDOW_SCENARIOS = {"tags_win": "tags", "labels_win": "labels", "pallets_win": "pallets", "pallets_winh": "pallets"}
+# LOC-12: инфляция ковариации после серии отказов: --adapt
+ADAPT_SCENARIOS = {"tags_adapt": "tags", "labels_adapt": "labels", "pallets_adapt": "pallets"}
 
 
-def experiment(wh: Warehouse, seeds: int, dt: float = 0.1, sm: SensorModel | None = None, window: bool = False):
+def experiment(wh: Warehouse, seeds: int, dt: float = 0.1, sm: SensorModel | None = None, window: bool = False,
+               adapt: bool = False):
     sm = sm or SensorModel()
     p = ScanParams()
     pl = plan(wh, p)
     trajs = [true_trajectory(s.waypoints, p, dt) for s in pl.sorties]
-    scenarios = {**SCENARIOS, **(WINDOW_SCENARIOS if window else {})}
+    scenarios = {**SCENARIOS, **(WINDOW_SCENARIOS if window else {}), **(ADAPT_SCENARIOS if adapt else {})}
     results = {name: [] for name in scenarios}
     for seed in range(seeds):
         for name, kind in scenarios.items():
@@ -311,12 +327,13 @@ def main() -> None:
     ap.add_argument("--scale-err", type=float, default=SensorModel.scale_err, help="СКО ошибки масштаба VIO")
     ap.add_argument("--yaw-bias", type=float, default=SensorModel.yaw_bias_deg_min, help="СКО дрейфа курса, град/мин")
     ap.add_argument("--window", action="store_true", help="добавить оптимизацию в скользящем окне (гл. 9)")
+    ap.add_argument("--adapt", action="store_true", help="добавить EKF с инфляцией ковариации (LOC-12)")
     a = ap.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     wh = Warehouse.load(a.layout) if a.layout else make_grid_warehouse()
     sm = SensorModel(scale_err=a.scale_err, yaw_bias_deg_min=a.yaw_bias)
-    results, trajs = experiment(wh, a.seeds, sm=sm, window=a.window)
+    results, trajs = experiment(wh, a.seeds, sm=sm, window=a.window, adapt=a.adapt)
     table = summarize(results)
     print(table)
     if a.plot:
