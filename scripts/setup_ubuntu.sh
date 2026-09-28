@@ -129,7 +129,8 @@ if ! command -v MicroXRCEAgent >/dev/null; then
   [ -d "$SRC/Micro-XRCE-DDS-Agent" ] || \
     clone "$XRCE_AGENT_VERSION" https://github.com/eProsima/Micro-XRCE-DDS-Agent.git "$SRC/Micro-XRCE-DDS-Agent"
   cmake -S "$SRC/Micro-XRCE-DDS-Agent" -B "$SRC/Micro-XRCE-DDS-Agent/build"
-  cmake --build "$SRC/Micro-XRCE-DDS-Agent/build" -j"$JOBS"
+  # суперсборка клонирует Fast-DDS, Fast-CDR, spdlog... с GitHub (ExternalProject); повтор продолжает с упавшего шага
+  retry_n 6 cmake --build "$SRC/Micro-XRCE-DDS-Agent/build" -j"$JOBS"
   sudo cmake --install "$SRC/Micro-XRCE-DDS-Agent/build"
   sudo ldconfig /usr/local/lib/
 fi
