@@ -8,7 +8,7 @@
   model.config, model.sdf   — модель (по образцу PX4 x500_depth: include merge='true' + фиксированные шарниры)
   camera_left.yaml, camera_right.yaml — калибровка в формате ROS camera_info (идеальный пинхол Gazebo)
   mounts.json               — установка камер на base_link (для статического TF, узел odom_tf)
-  bridge.yaml               — конфиг ros_gz_bridge: изображения, depth, /clock
+  bridge.yaml               — конфиг ros_gz_bridge: изображения, depth, /clock, истинная поза (/gz/true_pose)
 
 Камера Gazebo смотрит вдоль +x своего звена; звено левой камеры повёрнуто на +90° по рысканию
 (смотрит в +y тела), правой — на −90°; tilt_down — наклон вниз (тангаж звена).
@@ -83,7 +83,21 @@ def mounts(offset_y: float = 0.08, z: float = ScanParams.camera_z_offset, tilt_d
     ]
 
 
-def build(cam: Camera, rate: float = 2.0, tilt_down_deg: float = 0.0, world: str = "warehouse") -> dict[str, str]:
+# SIM-05: истинная поза модели для fake_vio и метрик. Не /world/<мир>/dynamic_pose/info: там имя модели лежит
+# в pose.name, а ros_gz_bridge (jazzy, convert/geometry_msgs.cpp) берёт child_frame_id и время только из
+# заголовка каждой позы — у SceneBroadcaster они пустые. PosePublisher заполняет их (gz-sim8, PosePublisher.cc).
+TRUE_POSE_TOPIC = "/invent/true_pose"
+POSE_PUBLISHER = f"""    <plugin filename="gz-sim-pose-publisher-system" name="gz::sim::systems::PosePublisher">
+      <publish_link_pose>false</publish_link_pose>
+      <publish_model_pose>true</publish_model_pose>
+      <use_pose_vector_msg>true</use_pose_vector_msg>
+      <update_frequency>50</update_frequency>
+      <topic>{TRUE_POSE_TOPIC}</topic>
+    </plugin>
+"""
+
+
+def build(cam: Camera, rate: float = 2.0, tilt_down_deg: float = 0.0) -> dict[str, str]:
     """-> {имя файла: содержимое}."""
     g = gazebo_camera(cam)
     ms = mounts(tilt_down_deg=tilt_down_deg)
@@ -106,7 +120,7 @@ def build(cam: Camera, rate: float = 2.0, tilt_down_deg: float = 0.0, world: str
       <child>camera_link</child>
       <pose relative_to="base_link">.12 .03 .242 0 0 0</pose>
     </joint>
-{links}  </model>
+{links}{POSE_PUBLISHER}  </model>
 </sdf>
 """
     config = f"""<?xml version="1.0"?>
@@ -122,8 +136,8 @@ def build(cam: Camera, rate: float = 2.0, tilt_down_deg: float = 0.0, world: str
             ("/clock", "/clock", "rosgraph_msgs/msg/Clock", "gz.msgs.Clock"),
             *[(m["topic"], m["topic"], "sensor_msgs/msg/Image", "gz.msgs.Image") for m in ms],
             ("/depth_camera", "/depth_camera", "sensor_msgs/msg/Image", "gz.msgs.Image"),
-            # истинные позы моделей — для «фальшивого VIO» (SIM-05) и метрик
-            ("/gz/dynamic_pose", f"/world/{world}/dynamic_pose/info", "tf2_msgs/msg/TFMessage", "gz.msgs.Pose_V")]:
+            # истинная поза дрона — для «фальшивого VIO» (SIM-05) и метрик
+            ("/gz/true_pose", TRUE_POSE_TOPIC, "tf2_msgs/msg/TFMessage", "gz.msgs.Pose_V")]:
         bridge.append(f'- ros_topic_name: "{ros_topic}"\n  gz_topic_name: "{gz_topic}"\n  ros_type_name: "{ros_t}"\n'
                       f'  gz_type_name: "{gz_t}"\n  direction: GZ_TO_ROS')
     files = {"model.sdf": sdf, "model.config": config, "bridge.yaml": "\n".join(bridge) + "\n",

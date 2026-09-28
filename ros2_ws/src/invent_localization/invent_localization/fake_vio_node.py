@@ -1,7 +1,7 @@
 """SIM-05: «фальшивый VIO» для SITL — истинная поза из Gazebo + дрейф как у визуально-инерциальной одометрии.
 
-Gazebo публикует позы моделей в /world/<мир>/dynamic_pose/info (мост ros_gz -> tf2_msgs/TFMessage,
-см. bridge.yaml от sim/make_drone_model.py). Узел берёт позу дрона, считает истинное приращение в кадре
+Истинная поза дрона — плагин PosePublisher модели (sim/make_drone_model.py) -> мост ros_gz -> /gz/true_pose
+(tf2_msgs/TFMessage, child_frame_id = имя модели, время симуляции). Узел берёт позу дрона, считает истинное приращение в кадре
 тела, портит его ошибкой масштаба, дрейфом курса и шумом (модель как в research/landmark_ekf) и
 интегрирует в кадре odom. Выход — nav_msgs/Odometry (`vio_odom`) для landmark_localizer; TF не публикует.
 
@@ -35,12 +35,17 @@ class FakeVio(Node):
         self.prev = None          # (t, x, y, z, yaw, roll, pitch) истина
         self.est = None           # (x, y, z, yaw) в odom
         self.pub = self.create_publisher(Odometry, "vio_odom", 50)
-        self.create_subscription(TFMessage, "/gz/dynamic_pose", self.on_poses, 50)
+        self.create_subscription(TFMessage, "/gz/true_pose", self.on_poses, 50)
+        self.warned = False
         self.get_logger().info(f"масштаб {self.scale:.4f}, дрейф курса {math.degrees(self.yaw_bias) * 60:.2f}°/мин")
 
     def on_poses(self, msg: TFMessage):
         tr = next((t for t in msg.transforms if t.child_frame_id == self.model), None)
         if tr is None:
+            if not self.warned:
+                self.warned = True
+                self.get_logger().warn(f"в /gz/true_pose нет {self.model}: есть "
+                                       f"{[t.child_frame_id for t in msg.transforms]} — задайте model_name")
             return
         q = tr.transform.rotation
         r = matrix_from_quat(q.w, q.x, q.y, q.z)

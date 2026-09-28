@@ -86,6 +86,9 @@ class _Logger:
     def _log(self, level, text):
         self.lines.append((level, text))
 
+    def debug(self, t, **_):
+        self._log("DEBUG", t)
+
     def info(self, t, **_):
         self._log("INFO", t)
 
