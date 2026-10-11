@@ -5,18 +5,18 @@
 # = 0.15/0.07/0.05): основной запас держит планировщик (ScanParams.reserve = 25%), PX4 — последняя линия.
 
 # Скорости и развороты: проход 3 м, VIO не любит резких поворотов
-MPC_XY_VEL_MAX 1.5
+# Сначала зависимые скорости, потом максимумы: иначе PX4 на время между командами урезает их сам
+# с critical-сообщением («Cruise speed has been constrained by max speed», MulticopterPositionControl.cpp v1.17)
 MPC_XY_CRUISE 1.0
-MPC_Z_VEL_MAX_UP 1.0
-MPC_Z_VEL_MAX_DN 0.7
-MPC_YAWRAUTO_MAX 30
-# Зависимые скорости: больше максимума PX4 урезает их сам, но с critical-сообщением
-# («Cruise speed has been constrained by max speed», MulticopterPositionControl.cpp v1.17) — задаём явно
 MPC_VEL_MANUAL 1.0
 MPC_Z_V_AUTO_UP 1.0
 MPC_Z_V_AUTO_DN 0.7
 MPC_TKO_SPEED 0.7
 MPC_LAND_SPEED 0.5
+MPC_XY_VEL_MAX 1.5
+MPC_Z_VEL_MAX_UP 1.0
+MPC_Z_VEL_MAX_DN 0.7
+MPC_YAWRAUTO_MAX 30
 
 # Аварийные режимы: только посадка на месте, никакого «возврата» по прямой сквозь стеллажи
 COM_OF_LOSS_T 0.5
