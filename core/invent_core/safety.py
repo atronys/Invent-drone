@@ -93,6 +93,9 @@ class Geofence:
     def __init__(self, wh: Warehouse, drone_radius: float = 0.35, clearance: float = 0.3, z_margin: float = 0.5):
         keep = drone_radius + clearance
         z_top = wh.ceiling_z - z_margin
+        # низ — ниже пола: оценка высоты на доке шумит около нуля (в SITL −0.03 м), и граница z=0
+        # давала STOP «вне геозоны» ещё до взлёта (первый прогон smoke_sitl 12.10.2026)
+        z_low = -0.5
         xc = wh.cross_aisle_x
         self.boxes: list[Box] = []
         ys = []
@@ -101,12 +104,12 @@ class Geofence:
             faces = sorted(r.face_y for r in rows)
             lo, hi = (faces[0], faces[-1]) if len(faces) > 1 else (a.y - 1.0, a.y + 1.0)
             x_end = max(r.end_x for r in rows)
-            self.boxes.append(Box(xc - 0.5, x_end + 0.5, lo + keep, hi - keep, 0.0, z_top, f"проход {a.id}"))
+            self.boxes.append(Box(xc - 0.5, x_end + 0.5, lo + keep, hi - keep, z_low, z_top, f"проход {a.id}"))
             ys.append(a.y)
         ys.append(wh.dock[1])
-        self.boxes.append(Box(xc - 0.6, xc + 0.6, min(ys) - 0.6, max(ys) + 0.6, 0.0, z_top, "магистральный проезд"))
+        self.boxes.append(Box(xc - 0.6, xc + 0.6, min(ys) - 0.6, max(ys) + 0.6, z_low, z_top, "магистральный проезд"))
         dx, dy = wh.dock[0], wh.dock[1]
-        self.boxes.append(Box(dx - 0.6, dx + 0.6, dy - 0.6, dy + 0.6, 0.0, z_top, "док"))
+        self.boxes.append(Box(dx - 0.6, dx + 0.6, dy - 0.6, dy + 0.6, z_low, z_top, "док"))
 
     def contains(self, p) -> bool:
         return any(b.contains(p) for b in self.boxes)

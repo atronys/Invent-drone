@@ -33,6 +33,12 @@ class TestGeofence(unittest.TestCase):
         self.assertTrue(gf.contains((5.0, wh.aisles[0].y, 2.0)))     # ось прохода
         self.assertFalse(gf.contains((5.0, wh.aisles[0].y, wh.ceiling_z)))  # под потолком
 
+    def test_dock_with_noisy_altitude_is_inside(self):
+        """Регрессия SITL: на доке z ≈ −0.03 м — это не выход из геозоны."""
+        wh = make_grid_warehouse()
+        gf = Geofence(wh)
+        self.assertTrue(gf.contains((wh.dock[0] + 0.02, wh.dock[1] - 0.01, -0.03)))
+
 
 @unittest.skipIf(np is None, "нужен numpy")
 class TestSafetyBubble(unittest.TestCase):
