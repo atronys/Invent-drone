@@ -148,6 +148,10 @@ fi
 # Ubuntu 24.04 запрещает pip в системный Python (PEP 668); пакеты чисто пользовательские, это безопасно.
 retry_n 10 sudo apt install -y python3-numpy python3-opencv python3-matplotlib
 retry_n 5 pip3 install --user --break-system-packages zxing-cpp python-barcode pillow
+# requirements.txt PX4 ставит в ~/.local matplotlib/pandas/pyulog и тянет numpy 2, который перекрывает системный
+# numpy 1.26; cv_bridge из ROS 2 Jazzy собран под numpy 1.x и падает при импорте (label_reader, safety_monitor;
+# первый прогон smoke_sitl 12.10.2026). contourpy 1.4 требует numpy 2 — откатываем и его.
+retry_n 5 pip3 install --user --break-system-packages "numpy<2" "contourpy<1.4"
 set +u; source /opt/ros/jazzy/setup.bash
 (cd "$PROJECT_DIR/ros2_ws" && colcon build --symlink-install --parallel-workers "$JOBS")
 
