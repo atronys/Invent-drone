@@ -19,12 +19,23 @@ set +u; source /opt/ros/jazzy/setup.bash; source "$ROOT/ros2_ws/install/setup.ba
 export PYTHONPATH="$ROOT/core:${PYTHONPATH:-}"
 log() { echo "[smoke] $*" | tee -a "$OUT/summary.txt"; }
 
+kill_sim() {
+  # SIGINT для ros2 launch не всегда доходит до узлов: остаются старые mission_node/safety_monitor и
+  # командуют PX4 следующего прогона (12.10.2026: узлы трёх прогонов сразу -> ABORT). Добиваем по пути установки.
+  pkill -INT -f "ros2 launch invent_bringup" 2>/dev/null; sleep 3
+  pkill -f "$ROOT/ros2_ws/install/" 2>/dev/null; pkill -f "ros_gz_bridge/parameter_bridge" 2>/dev/null
+  pkill -f "ros2 launch invent_bringup" 2>/dev/null
+  pkill -f "bin/px4" 2>/dev/null; pkill -f "gz sim" 2>/dev/null; pkill -f MicroXRCEAgent 2>/dev/null
+  sleep 2
+}
 cleanup() {
   log "остановка процессов"
-  [ -n "${ROS_PID:-}" ] && kill -INT "$ROS_PID" 2>/dev/null
-  sleep 3
-  pkill -f "bin/px4" 2>/dev/null; pkill -f "gz sim" 2>/dev/null; pkill -f MicroXRCEAgent 2>/dev/null
+  kill_sim
 }
+if pgrep -f "$ROOT/ros2_ws/install/|bin/px4|gz sim" >/dev/null; then
+  log "остались процессы прошлого прогона — останавливаю"
+  kill_sim
+fi
 trap cleanup EXIT
 
 # 1. Маленький склад (1 проход × 4 секции × 2 яруса) и лёгкие камеры: дымовой тест, а не эксперимент.
