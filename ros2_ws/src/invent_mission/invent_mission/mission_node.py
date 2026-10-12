@@ -136,7 +136,10 @@ class MissionNode(Node):
 
     # --- выходы -----------------------------------------------------------
     def now_us(self) -> int:
-        return self.get_clock().now().nanoseconds // 1000
+        """Метка времени для сообщений PX4: 0 = «время прихода». Узел живёт на времени симуляции
+        (use_sim_time), а uXRCE-DDS пересчитывает ненулевые метки по системным часам агента
+        (Tools/msg/templates/ucdr/msg.h.em, PX4 v1.17)."""
+        return 0
 
     def now_s(self) -> float:
         return self.get_clock().now().nanoseconds * 1e-9

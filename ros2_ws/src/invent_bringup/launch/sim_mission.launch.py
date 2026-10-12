@@ -58,7 +58,10 @@ def generate_launch_description():
                           "sortie": ParameterValue(LaunchConfiguration("sortie"), value_type=int),
                           "series": ParameterValue(LaunchConfiguration("series"), value_type=bool),
                           "continue_after_s": ParameterValue(LaunchConfiguration("continue_after_s"),
-                                                             value_type=float)}]),
+                                                             value_type=float)},
+                         # время симуляции: в WSL она идёт ~0.3× реального, и на системных часах «зависание 1 с»
+                         # длилось 0.3 с симуляции, а уставка ползла в 3 раза быстрее v_scan (SITL 12.10.2026)
+                         sim_time]),
         *readers,
         Node(package="invent_localization", executable="fake_vio", output="screen", parameters=[sim_time],
              condition=IfCondition(LaunchConfiguration("localization"))),
