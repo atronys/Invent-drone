@@ -29,7 +29,8 @@ class PlanningError(ValueError):
 class ScanParams:
     camera: Camera = field(default_factory=Camera)
     view_margin: float = 0.2         # доля кадра по краям, которую не считаем надёжной
-    min_z: float = 0.8               # ниже не летаем (люди, техника, эффект близости пола)
+    min_z: float = 0.6               # ниже не летаем (эффект близости пола). 0.8 не годится: этикетки 1-го яруса
+                                     # (0.5 м) целиком не входят в кадр ни одной из камер-кандидатов (12.10.2026)
     transit_z: float = 2.0           # высота перелётов по магистральному проезду
     v_transit: float = 1.0           # м/с
     v_scan: float = 0.4              # м/с — ограничено смазом, см. barcode.motion_blur_px
@@ -42,6 +43,8 @@ class ScanParams:
     turnaround_s: float = 120.0      # замена/зарядка АКБ между вылетами
     cover_address_labels: bool = False  # держать в кадре и адресные этикетки на балках (ориентиры LOC-11)
     camera_z_offset: float = 0.12    # боковые камеры выше центра дрона (sim/make_drone_model.py, крепление)
+    label_size: tuple[float, float] = (0.148, 0.105)  # ширина, высота этикетки, м (A6): в надёжной зоне — целиком
+    address_label_size: tuple[float, float] = (0.10, 0.05)  # адресная этикетка на балке (sim/generate_world.py)
 
     @classmethod
     def load(cls, path: str | Path) -> "ScanParams":
@@ -61,6 +64,9 @@ class ScanParams:
             cam = Camera.load(path.parent / d.pop("camera_file"))
         elif "camera" in d:
             cam = Camera(**d.pop("camera"))
+        for k in ("label_size", "address_label_size"):
+            if k in d:
+                d[k] = tuple(d[k])
         return replace(cls(camera=cam), **d)
 
 
@@ -154,7 +160,14 @@ def _aisle_passes(wh: Warehouse, aisle: Aisle, p: ScanParams, direction: int):
     rows = [wh.row(r) for r in aisle.rows]
     dist = min(abs(aisle.y - r.face_y) for r in rows)  # ближний фасад — худший случай для полосы
     fp_w, fp_h = p.camera.footprint(dist)
-    band, step = fp_h * (1 - p.view_margin), fp_w * (1 - p.view_margin)
+    # в надёжной зоне кадра должна быть вся этикетка, а не её центр: полоса и шаг меньше на размер этикетки
+    # (SITL 12.10.2026: центр в зоне с запасом 4 см, нижний край — за кадром при ошибке высоты PX4 5–8 см)
+    band = fp_h * (1 - p.view_margin) - p.label_size[1]
+    addr_band = fp_h * (1 - p.view_margin) - p.address_label_size[1]
+    step = fp_w * (1 - p.view_margin) - p.label_size[0]
+    if band <= 0 or step <= 0:
+        raise PlanningError(f"проход {aisle.id}: кадр на фасаде {fp_w:.2f}×{fp_h:.2f} м меньше этикетки "
+                            f"{p.label_size[0]}×{p.label_size[1]} м с полями view_margin={p.view_margin}")
     locs = [loc for r in rows for loc in r.locations()]
     addr_zs = (sorted({r.address_z(lv) for r in rows for lv in range(1, len(r.level_z) + 1)})
                if p.cover_address_labels else [])
@@ -173,7 +186,7 @@ def _aisle_passes(wh: Warehouse, aisle: Aisle, p: ScanParams, direction: int):
                 f"проход {aisle.id}: этикетки на высотах {lost} вне полосы обзора при высоте камер {z:.2f} "
                 f"(min_z={p.min_z}); нужен наклон камеры или меньший min_z"
             )
-        if (addr_zs and not any(abs(g - z) <= band / 2 + 1e-9 for g in addr_zs)
+        if (addr_zs and not any(abs(g - z) <= addr_band / 2 + 1e-9 for g in addr_zs)
                 and any(abs(loc.z - z) <= band / 2 + 1e-9 for loc in locs)):
             warnings.append(f"проход {aisle.id}, z={z:.2f}: адресные этикетки не в кадре — нет ориентиров "
                             f"(нужно больше пикселей по вертикали, см. barcode.required_vertical_px)")

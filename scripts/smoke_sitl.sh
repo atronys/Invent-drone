@@ -42,7 +42,7 @@ trap cleanup EXIT
 #    Модуль этикеток 0.8 мм и HFOV 20° при 2028 px: ~3 px на модуль на 1.5 м — читаемо и быстро рендерится.
 python3 -m invent_core make-layout "$OUT/layout.json" --aisles 1 --bays 4 --levels 2 --name smoke >/dev/null
 cat > "$OUT/scan_params.json" <<'EOF'
-{"camera": {"width": 2028, "height": 1520, "hfov_deg": 20.0, "vfov_deg": 15.1}, "min_z": 0.5, "hold_s": 1.0}
+{"camera": {"width": 2028, "height": 1520, "hfov_deg": 20.0, "vfov_deg": 15.1}, "min_z": 0.35, "hold_s": 1.0}
 EOF
 python3 "$ROOT/sim/generate_world.py" "$OUT/layout.json" -o "$OUT/world" --module-mm 0.8 | tee -a "$OUT/summary.txt"
 python3 "$ROOT/sim/make_drone_model.py" -o "$OUT/models" --params "$OUT/scan_params.json" --rate 2 | tee -a "$OUT/summary.txt"

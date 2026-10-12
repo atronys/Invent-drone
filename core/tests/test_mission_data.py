@@ -144,8 +144,10 @@ class TestAddressLabelsInFrame(unittest.TestCase):
             pl = plan(wh, ScanParams(camera=cam, cover_address_labels=True, min_z=0.5))
             return [w for w in pl.warnings if "адресные этикетки не в кадре" in w]
         landscape, portrait = Camera(4056, 3040, 29.4, 22.2), Camera(3040, 4056, 22.2, 29.4)
-        self.assertGreater(len(warn(landscape)), len(wh.aisles))       # не хватает на верхних ярусах
-        self.assertEqual(len(warn(portrait)), len(wh.aisles))          # только напольный ярус (0.1 м)
+        # Пока критерий был «центр этикетки в зоне», портрет терял только напольный ярус. С требованием «вся
+        # этикетка в надёжной зоне» разнос «верх паллетной — низ адресной» 0.64 м > 0.63 м кадра на 1.5 м:
+        # портрет всё ещё лучше ландшафта, но не идеален (12.10.2026, ADR-11 — запас ~1 см).
+        self.assertLess(len(warn(portrait)), len(warn(landscape)))
 
     def test_address_z(self):
         row = make_grid_warehouse().rows[0]
