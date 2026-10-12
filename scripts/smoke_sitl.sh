@@ -79,7 +79,7 @@ fi
 
 # 3. Наши узлы
 ros2 launch invent_bringup sim_mission.launch.py layout:="$OUT/layout.json" scan_params:="$OUT/scan_params.json" \
-    model_dir:="$OUT/models/x500_invent" > "$OUT/ros.log" 2>&1 &
+    model_dir:="$OUT/models/x500_invent" save_frames_dir:="$OUT/frames" > "$OUT/ros.log" 2>&1 &
 ROS_PID=$!
 START=$(date +%s)
 if timeout "$TIMEOUT" bash -c "until grep -qE 'посадка завершена|ABORT|вышли из Offboard|Traceback' '$OUT/ros.log'; do sleep 5; done"; then

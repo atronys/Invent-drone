@@ -31,7 +31,7 @@ def generate_launch_description():
         Node(package="invent_perception", executable="label_reader", name=f"label_reader_{side}", output="screen",
              remappings=[("image", f"/camera/{side}/image_raw")],
              parameters=[{"layout": layout, "camera_info": in_model(f"camera_{side}.yaml"),
-                          "frame_is_optical": False}, sim_time])
+                          "frame_is_optical": False, "save_frames_dir": text("save_frames_dir")}, sim_time])
         for side in ("left", "right")
     ]
     return LaunchDescription([
@@ -43,6 +43,7 @@ def generate_launch_description():
         arg("model_dir", os.path.expanduser("~/INVENT_DRONE/sim/models/x500_invent"),
             "каталог модели от sim/make_drone_model.py (bridge.yaml, mounts.json, camera_*.yaml)"),
         arg("agent", "true", "запускать MicroXRCEAgent"),
+        arg("save_frames_dir", "", "отладка чтения: сохранять кадры камер этикеток в каталог"),
         arg("localization", "false", "SIM-05/LOC-11: фальшивый VIO + локализация по этикеткам -> поза в PX4 (GPS выключить)"),
         ExecuteProcess(cmd=["MicroXRCEAgent", "udp4", "-p", "8888"], output="screen",
                        condition=IfCondition(LaunchConfiguration("agent"))),

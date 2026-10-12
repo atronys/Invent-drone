@@ -36,6 +36,8 @@ class LabelReader(Node):
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("frame_is_optical", True)
         self.declare_parameter("tf_timeout", 0.05)
+        self.declare_parameter("save_frames_dir", "")   # отладка чтения: сохранять кадры (пусто — нет)
+        self.declare_parameter("save_every", 1)
 
         layout = self.get_parameter("layout").value
         self.wh = Warehouse.load(layout) if layout else None
@@ -69,12 +71,25 @@ class LabelReader(Node):
             r = matmul(r, R_LINK_OPTICAL)
         return r, (tr.translation.x, tr.translation.y, tr.translation.z)
 
+    def save_frame(self, msg: Image, img, reads):
+        out = self.get_parameter("save_frames_dir").value
+        if not out or (self.frames // self.get_parameter("every_nth").value) % self.get_parameter("save_every").value:
+            return
+        import pathlib
+
+        import cv2
+        d = pathlib.Path(out)
+        d.mkdir(parents=True, exist_ok=True)
+        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        cv2.imwrite(str(d / f"{self.get_name()}_{t:09.2f}_reads{len(reads)}.png"), img)
+
     def on_image(self, msg: Image):
         self.frames += 1
         if self.frames % self.get_parameter("every_nth").value:
             return
         img = self.bridge.imgmsg_to_cv2(msg, desired_encoding="mono8")
         reads = barcode.decode(img)
+        self.save_frame(msg, img, reads)
         pose = self.camera_pose(msg) if self.wh else None
         if pose:  # PER-09: этикетка видна, но не прочитана -> пустой text с адресом (scan_recorder: «занято»)
             for addr in unread_label_addresses(img, reads, self.cam, pose[0], pose[1], self.wh):
