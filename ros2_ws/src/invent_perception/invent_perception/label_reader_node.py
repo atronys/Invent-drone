@@ -71,7 +71,7 @@ class LabelReader(Node):
             r = matmul(r, R_LINK_OPTICAL)
         return r, (tr.translation.x, tr.translation.y, tr.translation.z)
 
-    def save_frame(self, msg: Image, img, reads):
+    def save_frame(self, msg: Image, img, reads, pose=None):
         out = self.get_parameter("save_frames_dir").value
         if not out or (self.frames // self.get_parameter("every_nth").value) % self.get_parameter("save_every").value:
             return
@@ -81,7 +81,8 @@ class LabelReader(Node):
         d = pathlib.Path(out)
         d.mkdir(parents=True, exist_ok=True)
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        cv2.imwrite(str(d / f"{self.get_name()}_{t:09.2f}_reads{len(reads)}.png"), img)
+        where = "" if pose is None else "_cam{:.2f},{:.2f},{:.2f}".format(*pose[1])
+        cv2.imwrite(str(d / f"{self.get_name()}_{t:09.2f}{where}_reads{len(reads)}.png"), img)
 
     def on_image(self, msg: Image):
         self.frames += 1
@@ -89,8 +90,8 @@ class LabelReader(Node):
             return
         img = self.bridge.imgmsg_to_cv2(msg, desired_encoding="mono8")
         reads = barcode.decode(img)
-        self.save_frame(msg, img, reads)
         pose = self.camera_pose(msg) if self.wh else None
+        self.save_frame(msg, img, reads, pose)
         if pose:  # PER-09: этикетка видна, но не прочитана -> пустой text с адресом (scan_recorder: «занято»)
             for addr in unread_label_addresses(img, reads, self.cam, pose[0], pose[1], self.wh):
                 out = LabelRead(text="", symbology="", sscc="", address=addr, confidence=0.0)
