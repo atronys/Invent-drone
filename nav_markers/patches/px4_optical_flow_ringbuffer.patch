@@ -1,0 +1,15 @@
+diff --git a/src/modules/sensors/vehicle_optical_flow/RingBuffer.hpp b/src/modules/sensors/vehicle_optical_flow/RingBuffer.hpp
+--- a/src/modules/sensors/vehicle_optical_flow/RingBuffer.hpp
++++ b/src/modules/sensors/vehicle_optical_flow/RingBuffer.hpp
+@@ -141,7 +141,10 @@
+
+ 			uint8_t index = (_tail + i) % SIZE;
+
+-			if (_buffer[index].time_us >= timestamp_oldest && _buffer[index].time_us <= timestamp_newest) {
++			// Пустая (уже извлечённая) запись имеет time_us == 0. При timestamp_oldest == 0 (первое сообщение потока
++			// в SITL: интегрирование с нуля) она проходила проверку, и VehicleOpticalFlow::Run бесконечно извлекал
++			// пустые сэмплы с dt = 0 — очередь wq:nav_and_controllers (sensors, EKF2) вставала. INVENT_DRONE/nav_markers.
++			if (_buffer[index].time_us != 0 && _buffer[index].time_us >= timestamp_oldest && _buffer[index].time_us <= timestamp_newest) {
+ 				*sample = _buffer[index];
+
+ 				// Now we can set the tail to the item which
