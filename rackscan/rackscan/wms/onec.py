@@ -83,11 +83,20 @@ class OneCHttpBackend:
     def post_result(self, task_id: str, result: dict) -> dict:
         return self.http.call("POST", f"/inventory/{urllib.parse.quote(str(task_id))}/results", result)
 
+    @staticmethod
+    def _with_summary(rep: dict) -> dict:
+        """Итоги ведомости считаются на стенде, если сервис 1С их не прислал."""
+        if "summary" not in rep and "lines" in rep:
+            from .reconcile import summarize
+            rep["summary"] = summarize(rep["lines"])
+        return rep
+
     def report(self, task_id: str) -> dict:
-        return self.http.call("GET", f"/inventory/{urllib.parse.quote(str(task_id))}")
+        return self._with_summary(self.http.call("GET", f"/inventory/{urllib.parse.quote(str(task_id))}"))
 
     def close_task(self, task_id: str) -> dict:
-        return self.http.call("POST", f"/inventory/{urllib.parse.quote(str(task_id))}/close", {})
+        return self._with_summary(
+            self.http.call("POST", f"/inventory/{urllib.parse.quote(str(task_id))}/close", {}))
 
 
 # Пример соответствия для чтения остатков через OData. Имена ниже — ЗАГЛУШКИ: в вашей
