@@ -37,8 +37,15 @@ class InventoryTask:
     status: str = "open"
     lines: list[TaskLine] = field(default_factory=list)
 
+    # Как это называется в «1С:WMS Логистика. Управление складом» (редакция 5): инвентаризация
+    # оформляется документом «Плановая инвентаризация», работа по ячейке — задачей на пересчёт
+    # типа «Пересчет ячейки». Стенд выполняет именно её: считает контейнеры в ячейке и их коды.
+    DOCUMENT = "Плановая инвентаризация"
+    TASK_TYPE = "Пересчет ячейки"
+
     def to_dict(self) -> dict:
         return {"id": self.id, "created": self.created, "status": self.status,
+                "document": self.DOCUMENT, "task_type": self.TASK_TYPE,
                 "lines": [ln.to_dict() for ln in self.lines]}
 
     @classmethod

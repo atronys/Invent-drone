@@ -35,6 +35,8 @@ DEFAULTS: dict = {
         "db": "data/wms.sqlite",
         "demo": True,                    # наполнить эмулятор учебным складом, если он пуст
         "url": "",                       # для onec_http: http://сервер/база/hs/rackscan/v1
+        "odata_url": "",                 # http://сервер/база/odata/standard.odata — для «wms discover»
+        "address_template": None,        # вид адреса ячейки в WMS, напр. "A-01-{rack:02d}-{level:02d}-{pos:02d}"
         "user_env": "RACKSCAN_1C_USER",
         "password_env": "RACKSCAN_1C_PASSWORD",
     },

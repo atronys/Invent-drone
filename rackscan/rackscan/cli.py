@@ -127,6 +127,25 @@ def cmd_wms(a) -> int:
         wms, _, expect = build_demo(lay, seed=cfg.get("seed", 7), db_path=db, discrepancies=False)
         print(f"Учебный склад создан: {db} — ячеек {len(wms.cells())}, контейнеров {len(wms.stock())}")
         return 0
+    if a.action == "discover":
+        import os
+        from .wms.onec import discover
+        url = a.url or cfg["wms"].get("odata_url")
+        if not url:
+            print("Укажите адрес OData: --url http://сервер/база/odata/standard.odata")
+            return 1
+        found = discover(url, os.environ.get(cfg["wms"].get("user_env", "")) or None,
+                         os.environ.get(cfg["wms"].get("password_env", "")) or None)
+        print(f"Сущностей в составе OData: {found.pop('всего сущностей')}")
+        for group, items in found.items():
+            print(f"\n{group}: {len(items)}")
+            for it in items[:25]:
+                print(f"  {it['entity']}")
+                print("      " + ", ".join(it["properties"][:14]) + (" …" if len(it["properties"]) > 14 else ""))
+        if a.file:
+            Path(a.file).write_text(json.dumps(found, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
+            print("\nПолный список записан:", a.file)
+        return 0
     wms = EmulatorBackend(db)
     if a.action == "export":
         Path(a.file).write_text(wms.export_stock_csv(), encoding="utf-8", newline="\n")
@@ -343,7 +362,8 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=cmd_print)
 
     s = sub.add_parser("wms", help="эмулятор склада")
-    s.add_argument("action", choices=["init-demo", "export", "import", "report"])
+    s.add_argument("action", choices=["init-demo", "export", "import", "report", "discover"])
+    s.add_argument("--url", help="адрес стандартного интерфейса OData базы 1С (для discover)")
     s.add_argument("-c", "--config")
     s.add_argument("--db")
     s.add_argument("--file")
