@@ -1,0 +1,12 @@
+# ПК разработчика (Windows / Linux / macOS):
+#   python -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt     (Windows)
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt                  (Linux, macOS)
+numpy>=1.24
+opencv-python>=4.8
+zxing-cpp>=2.2
+flask>=3.0
+pillow>=10.0
+pyserial>=3.5
+# сборка документации в PDF (docs/build_pdf.py), для работы стенда не нужны
+markdown>=3.5
+pypdf>=4.0

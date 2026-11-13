@@ -1,0 +1,19 @@
+# Автозапуск RackScan. Установка — см. deploy/install_pi.sh (подставляет __ROOT__ и __USER__).
+[Unit]
+Description=RackScan — стенд сканирования стеллажей
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=__USER__
+WorkingDirectory=__ROOT__
+# Учётные данные 1С — в файле /etc/rackscan.env (права 600), не в настройках проекта:
+#   RACKSCAN_1C_USER=...
+#   RACKSCAN_1C_PASSWORD=...
+EnvironmentFile=-/etc/rackscan.env
+ExecStart=__ROOT__/.venv/bin/python -m rackscan run -c config/pi.json
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

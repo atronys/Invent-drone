@@ -1,0 +1,11 @@
+{
+  "layout": "config/layout.json",
+  "camera": {"source": "picamera", "preset": "imx708"},
+  "sensors": {"enabled": true, "port": "/dev/ttyUSB0"},
+  "wms": {
+    "backend": "onec_http",
+    "url": "http://192.168.1.10/wms/hs/rackscan/v1",
+    "user_env": "RACKSCAN_1C_USER",
+    "password_env": "RACKSCAN_1C_PASSWORD"
+  }
+}

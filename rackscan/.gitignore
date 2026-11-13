@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+data/
+out/
+config/pi.json
+config/onec.json
+config/calibration.json
+docs/build/
