@@ -1,0 +1,3 @@
+# Raspberry Pi: только то, чего нет в apt. numpy, OpenCV, Picamera2, Flask, Pillow и pyserial
+# ставятся системными пакетами (deploy/install_pi.sh) — не добавляйте их сюда.
+zxing-cpp>=2.2

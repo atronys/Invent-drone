@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RackScan — пульт оператора</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --line: #d9dde3; --text: #16191d; --muted: #5b6470;
+    --red: #c62828; --yellow: #f9a825; --green: #2e7d32; --idle: #546e7a; --accent: #1f5fbf;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 "Segoe UI", Roboto, Arial, sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; gap: 16px; align-items: baseline; padding: 10px 16px; background: var(--panel);
+           border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .meta { color: var(--muted); font-size: 13px; }
+  main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 12px; padding: 12px; }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+  .video { background: #111; border-radius: 8px; overflow: hidden; align-self: start; }
+  .video img { display: block; width: 100%; height: auto; }
+  .side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+  .status { border: none; color: #fff; padding: 16px; }
+  .status .headline { font-size: 26px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+  .status .hint { margin-top: 6px; font-size: 15px; opacity: .95; min-height: 1.4em; }
+  .status.RED { background: var(--red); } .status.GREEN { background: var(--green); }
+  .status.YELLOW { background: var(--yellow); color: #1c1600; } .status.IDLE { background: var(--idle); }
+  ul.cmds { list-style: none; margin: 0; padding: 0; }
+  ul.cmds li { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 17px; }
+  ul.cmds li:first-child { border-top: none; font-weight: 700; }
+  ul.cmds .ico { width: 34px; height: 34px; border-radius: 6px; background: #eef1f5; display: grid; place-items: center; font-size: 20px; flex: none; }
+  .empty { color: var(--muted); }
+  dl.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
+  dl.kv dt { color: var(--muted); } dl.kv dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+  button, a.btn { font: inherit; padding: 9px 14px; border-radius: 6px; border: 1px solid var(--line); background: #fff;
+                  color: var(--text); cursor: pointer; text-decoration: none; min-height: 40px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  button:focus-visible, a.btn:focus-visible, .cell:focus-visible { outline: 3px solid #7fb0ff; outline-offset: 2px; }
+  .racks { display: flex; gap: 14px; flex-wrap: wrap; }
+  .rack h3 { font-size: 13px; margin: 0 0 4px; color: var(--muted); font-weight: 600; }
+  .grid { display: grid; gap: 4px; }
+  .cell { min-width: 62px; padding: 5px 4px; border-radius: 5px; border: 2px solid transparent; background: #e6e9ee; font-size: 12px;
+          text-align: center; font-variant-numeric: tabular-nums; cursor: pointer; color: var(--text); min-height: 0; }
+  .cell.MATCH { background: #c9e7cf; } .cell.MANUAL { background: #ffe2a8; } .cell.NOT_SCANNED.done { background: #d5d9df; }
+  .cell.SHORTAGE, .cell.SURPLUS, .cell.MISMATCH, .cell.PARTIAL { background: #f6c4c4; }
+  .cell.target { border-color: var(--accent); }
+  .cell small { display: block; color: var(--muted); font-size: 11px; }
+  .legend { margin-top: 8px; color: var(--muted); font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+  .result img { max-width: 100%; border-radius: 6px; margin-top: 8px; border: 1px solid var(--line); }
+  .journal { font: 12px/1.5 ui-monospace, Consolas, monospace; max-height: 180px; overflow: auto; color: #333; white-space: pre-wrap; }
+  .err { color: var(--red); font-weight: 600; }
+  kbd { background: #eef1f5; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font: 12px ui-monospace, Consolas, monospace; }
+</style>
+</head>
+<body>
+<header>
+  <h1>RackScan — пульт оператора</h1>
+  <span class="meta" id="meta">подключение…</span>
+  <span class="meta err" id="err"></span>
+</header>
+<main>
+  <section class="video" aria-label="Трансляция с камеры">
+    <img id="video" src="/stream.mjpg" alt="Трансляция с камеры с пометками наведения">
+  </section>
+  <section class="side">
+    <div class="card status IDLE" id="status" role="status" aria-live="polite">
+      <div class="headline" id="headline">—</div>
+      <div class="hint" id="hint"></div>
+    </div>
+
+    <div class="card">
+      <h2>Что сделать</h2>
+      <ul class="cmds" id="cmds"><li class="empty">Команд нет</li></ul>
+    </div>
+
+    <div class="card">
+      <h2>Цель и положение камеры</h2>
+      <dl class="kv">
+        <dt>Ячейка</dt><dd id="target">—</dd>
+        <dt>Этап</dt><dd id="phase">—</dd>
+        <dt>Дистанция</dt><dd id="dist">—</dd>
+        <dt>Курс / тангаж / крен</dt><dd id="angles">—</dd>
+        <dt>Меток в кадре</dt><dd id="markers">—</dd>
+        <dt>Датчики</dt><dd id="sensors">—</dd>
+        <dt>Уставка носителю</dt><dd id="body">—</dd>
+      </dl>
+    </div>
+
+    <div class="card">
+      <h2>Задание</h2>
+      <div class="buttons">
+        <button class="primary" id="btnStart">Начать инвентаризацию</button>
+        <button id="btnFree">Начать в свободном режиме</button>
+        <button id="btnSkip">Пропустить ячейку</button>
+        <button id="btnStop">Остановить задание</button>
+        <a class="btn" href="/report" target="_blank" rel="noopener">Открыть ведомость</a>
+        <a class="btn" href="/report.csv">Скачать CSV</a>
+      </div>
+      <p class="empty" id="progress" style="margin:10px 0 0">Задание не запущено.</p>
+      <div id="simbox" hidden style="margin-top:10px">
+        <div class="buttons"><button id="btnAuto">Включить имитатор носителя</button></div>
+        <p class="empty" style="margin:8px 0 0">Виртуальная камера: <kbd>←</kbd><kbd>→</kbd> вдоль стеллажа,
+          <kbd>↑</kbd><kbd>↓</kbd> высота, <kbd>W</kbd><kbd>S</kbd> ближе/дальше, <kbd>Q</kbd><kbd>E</kbd> поворот.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Карта стеллажей</h2>
+      <div class="racks" id="racks"></div>
+      <div class="legend">
+        <span><i style="background:#c9e7cf"></i>совпадает</span>
+        <span><i style="background:#f6c4c4"></i>расхождение</span>
+        <span><i style="background:#ffe2a8"></i>ручная проверка</span>
+        <span><i style="background:#e6e9ee"></i>не сканировалась</span>
+        <span>Нажмите на ячейку, чтобы пересканировать её.</span>
+      </div>
+    </div>
+
+    <div class="card result">
+      <h2>Последний результат</h2>
+      <div id="last" class="empty">Пока нет результатов.</div>
+    </div>
+
+    <div class="card">
+      <h2>Журнал событий</h2>
+      <div class="journal" id="journal">—</div>
+    </div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const ICON = { x: { "ВПРАВО": "→", "ВЛЕВО": "←" }, y: { "ВВЕРХ": "↑", "ВНИЗ": "↓" },
+               z: { "БЛИЖЕ": "⇧", "ДАЛЬШЕ": "⇩" }, yaw: { "ПОВЕРНИТЕ ВЛЕВО": "↶", "ПОВЕРНИТЕ ВПРАВО": "↷" } };
+const PHASE = { IDLE: "ожидание", SEARCH: "поиск стеллажа", NAVIGATE: "выход к ячейке", ASSESS: "осмотр ячейки",
+                APPROACH: "подход к этикетке", READ: "съёмка и чтение", DONE: "результат записан", FINISHED: "задание выполнено" };
+const SCAN = { READ: "код прочитан", EMPTY: "пусто", NO_LABEL: "нет этикетки", READ_ERROR: "ошибка чтения",
+               UNCERTAIN: "занятость не определена", SKIPPED: "пропущено" };
+const VERDICT = { MATCH: "совпадает", SHORTAGE: "недостача", SURPLUS: "излишек", MISMATCH: "пересортица",
+                  PARTIAL: "частичное совпадение", MANUAL: "ручная проверка", NOT_SCANNED: "не сканировалась" };
+const FLAG = { GAP: "большой зазор между коробками", UNDERFILLED: "ячейка заполнена слабо", MULTI: "несколько кодов",
+               UNREAD_LABEL: "есть непрочитанная этикетка", POSE_AMBIGUOUS: "поза по одной метке" };
+let layoutReady = false, lastPhoto = "", state = {};
+
+async function post(name, body) {
+  const r = await fetch("/api/" + name, { method: "POST", headers: { "Content-Type": "application/json" },
+                                           body: JSON.stringify(body || {}) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) $("err").textContent = j.error || ("Команда не выполнена: " + r.status);
+  return j;
+}
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function buildLayout() {
+  const lay = await (await fetch("/api/layout")).json();
+  $("racks").innerHTML = lay.racks.map(r => `<div class="rack"><h3>Стеллаж ${String(r.id).padStart(2, "0")}</h3>
+    <div class="grid" style="grid-template-columns:repeat(${r.cells},auto)">${
+      r.addresses.flat().map(a => `<button class="cell" id="c-${a}" data-a="${a}" title="Пересканировать ${a}">${a}<small>—</small></button>`).join("")
+    }</div></div>`).join("");
+  $("racks").addEventListener("click", e => {
+    const b = e.target.closest(".cell");
+    if (b && state.task_id) post("rescan", { address: b.dataset.a });
+  });
+  layoutReady = true;
+}
+
+function render(s) {
+  state = s;
+  $("status").className = "card status " + (s.status || "IDLE");
+  $("headline").textContent = s.headline || "—";
+  $("hint").textContent = s.hint || "";
+  $("cmds").innerHTML = (s.commands || []).length
+    ? s.commands.map(c => `<li><span class="ico" aria-hidden="true">${(ICON[c.axis] || {})[c.text] || "•"}</span>${esc(c.phrase)}</li>`).join("")
+    : `<li class="empty">${s.status === "YELLOW" ? "Держите камеру неподвижно" : "Команд нет"}</li>`;
+  $("target").textContent = s.target ? `${s.target} — ${s.target_human}` : "—";
+  $("phase").textContent = PHASE[s.phase] || s.phase;
+  const p = s.pose;
+  $("dist").textContent = p ? `${p.distance_m.toFixed(2)} м` + (s.target_distance_m ? ` (нужно ${s.target_distance_m.toFixed(2)} м)` : "") : "метки не видны";
+  $("angles").textContent = p ? `${p.yaw_deg.toFixed(0)}° / ${p.pitch_deg.toFixed(0)}° / ${p.roll_deg.toFixed(0)}°` : "—";
+  $("markers").textContent = p ? p.markers + (p.ambiguous ? " (поза по одной метке — неточно)" : "") : "0";
+  const sn = s.sensors || {};
+  $("sensors").textContent = s.sensors_ok === false ? "сенсорная головка не отвечает"
+    : [sn.gyro_dps != null ? `вращение ${sn.gyro_dps.toFixed(1)} °/с` : null, sn.tof_mm != null ? `дальномер ${Math.round(sn.tof_mm)} мм` : null]
+        .filter(Boolean).join(", ") || "не подключены";
+  const b = s.body || {};
+  $("body").textContent = b.forward_m != null
+    ? `вперёд ${(b.forward_m * 100).toFixed(0)} см, вправо ${(b.right_m * 100).toFixed(0)} см, вверх ${(b.up_m * 100).toFixed(0)} см, поворот ${b.yaw_deg.toFixed(0)}°` : "—";
+  const pr = s.progress || {};
+  $("progress").textContent = s.task_id ? `Задание № ${s.task_id}: готово ${pr.done} из ${pr.total}.` : "Задание не запущено.";
+  const running = !["IDLE", "FINISHED"].includes(s.phase);
+  $("btnStart").disabled = $("btnFree").disabled = running;
+  $("btnSkip").disabled = $("btnStop").disabled = !running;
+  $("simbox").hidden = !s.sim;
+  $("btnAuto").textContent = s.autopilot ? "Выключить имитатор носителя" : "Включить имитатор носителя";
+  $("meta").textContent = `версия ${s.version} · ${s.fps} кадр/с · источник ${s.source}`;
+  if (s.error) $("err").textContent = "Сбой обработки кадра: " + s.error;
+  if (layoutReady) {
+    document.querySelectorAll(".cell").forEach(c => {
+      const r = (s.results || {})[c.dataset.a];
+      c.className = "cell" + (r ? " done " + (r.verdict || "NOT_SCANNED") : "") + (s.target === c.dataset.a ? " target" : "");
+      c.querySelector("small").textContent = r ? (SCAN[r.scan_status] || r.scan_status) : "—";
+    });
+  }
+  const r = s.last_result;
+  if (r) {
+    const flags = (r.flags || []).map(f => FLAG[f] || f).join(", ");
+    $("last").className = "";
+    $("last").innerHTML = `<dl class="kv">
+      <dt>Ячейка</dt><dd>${esc(r.address)}</dd>
+      <dt>Сканирование</dt><dd>${esc(SCAN[r.scan_status] || r.scan_status)}</dd>
+      <dt>Код</dt><dd>${esc((r.codes || []).join(", ") || "—")}</dd>
+      <dt>Сверка с учётом</dt><dd>${esc(VERDICT[r.verdict] || "нет данных")}${r.verdict_note ? " — " + esc(r.verdict_note) : ""}</dd>
+      <dt>Признаки</dt><dd>${esc(flags || "—")}</dd></dl>` +
+      (r.photo_annotated ? `<a href="/evidence/${esc(r.photo)}" target="_blank" rel="noopener"><img src="/evidence/${esc(r.photo_annotated)}" alt="Фото ячейки ${esc(r.address)} с пометками"></a>` : "");
+  }
+}
+
+async function poll() {
+  try {
+    render(await (await fetch("/api/state")).json());
+  } catch (e) { $("meta").textContent = "нет связи со стендом"; }
+  setTimeout(poll, 300);
+}
+async function pollJournal() {
+  try {
+    const j = await (await fetch("/api/journal?last=12")).json();
+    $("journal").textContent = j.reverse().map(e => {
+      const { seq, ts, kind, ...rest } = e;
+      return `${ts.slice(11, 19)} ${kind} ${Object.keys(rest).length ? JSON.stringify(rest) : ""}`;
+    }).join("\n") || "—";
+  } catch (e) {}
+  setTimeout(pollJournal, 2000);
+}
+
+$("btnStart").onclick = () => { $("err").textContent = ""; post("start", { mode: "task" }); };
+$("btnFree").onclick = () => { $("err").textContent = ""; post("start", { mode: "free" }); };
+$("btnSkip").onclick = () => post("skip");
+$("btnStop").onclick = () => { if (confirm("Остановить задание? Незавершённые ячейки останутся несканированными.")) post("stop"); };
+$("btnAuto").onclick = () => post("sim", { autopilot: !state.autopilot });
+document.addEventListener("keydown", e => {
+  if (!state.sim || e.target.closest("button, a, input")) return;
+  const k = { ArrowLeft: { dx: -0.05 }, ArrowRight: { dx: 0.05 }, ArrowUp: { dy: 0.05 }, ArrowDown: { dy: -0.05 },
+              w: { dz: -0.05 }, s: { dz: 0.05 }, q: { dyaw: -3 }, e: { dyaw: 3 } }[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+  if (k) { e.preventDefault(); post("sim", k); }
+});
+buildLayout().then(poll); pollJournal();
+</script>
+</body>
+</html>

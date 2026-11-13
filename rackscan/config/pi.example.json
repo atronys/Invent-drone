@@ -1,0 +1,16 @@
+{
+  "layout": "config/layout.json",
+  "camera": {
+    "source": "picamera",
+    "preset": "imx708",
+    "preview_size": [1536, 864],
+    "fps": 15,
+    "lens_position": null,
+    "calibration": null
+  },
+  "label": {"code_mm": 40.0, "module_mm": 1.905, "sticker_mm": 62.0, "format": "QRCode"},
+  "scan": {"d_label_cap_m": 0.55, "always_approach": true},
+  "sensors": {"enabled": true, "port": "/dev/ttyUSB0", "baud": 115200},
+  "wms": {"backend": "emulator", "db": "data/wms.sqlite", "demo": true},
+  "server": {"host": "0.0.0.0", "port": 8080}
+}
